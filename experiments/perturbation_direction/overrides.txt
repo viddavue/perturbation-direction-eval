@@ -1,0 +1,6 @@
+# Versions this pipeline was tested with. scldm pins anndata<=0.10.9, but scvi-tools 1.4 needs anndata>=0.11
+# (anndata.io); cellarium-ml after a3720244 dropped convert_to_tensor, which scldm.datamodule imports.
+anndata==0.11.4
+scvi-tools==1.4.2
+scanpy==1.11.5
+cellarium-ml @ git+https://github.com/cellarium-ai/cellarium-ml.git@a3720244bf0cfc4950e89ad583ceb0f86ed07199
