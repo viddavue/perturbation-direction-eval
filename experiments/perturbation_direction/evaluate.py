@@ -194,6 +194,30 @@ def report(methods, delta_true, deg, ceiling, exclude, args, out: pathlib.Path, 
         )
 
 
+def write_manifest(args, out: pathlib.Path, control: str) -> None:
+    """methods.json: where every scored method came from, so tools (e.g. dashboard.py) can reload the effects."""
+
+    def entry(path):
+        return {"path": str(path), "abs_path": str(pathlib.Path(path).resolve())}
+
+    methods = []
+    for name, path in parse_named(args.pred).items():
+        methods.append({"name": name, "kind": "pred", **entry(path)})
+        methods.append({"name": f"{name} (shuffled)", "kind": "shuffled", "source": name, "seed": args.seed})
+    for name, path in parse_named(args.baseline).items():
+        methods.append({"name": name, "kind": "baseline", **entry(path)})
+    manifest = {
+        "truth_dir": entry(args.truth_dir),
+        "specific_ref": entry(args.specific_ref) if args.specific_ref else None,
+        "control": control,
+        "exclude_target": args.exclude_target,
+        "eps": args.eps,
+        "min_degs": args.min_degs,
+        "methods": methods,
+    }
+    (out / "methods.json").write_text(json.dumps(manifest, indent=1))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--truth-dir", required=True)
@@ -236,6 +260,7 @@ def main(argv=None):
     for name, path in parse_named(args.baseline).items():
         methods[name] = pd.read_parquet(path)
 
+    write_manifest(args, out, info["control"])
     ceiling = pd.read_csv(truth_dir / "ceiling.csv", index_col=0)
     report(methods, delta_true, deg, ceiling, exclude, args, out, "", {"target_gene_down_frac": target_down})
 

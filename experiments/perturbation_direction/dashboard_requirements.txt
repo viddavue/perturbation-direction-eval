@@ -1,0 +1,5 @@
+# Dashboard (dashboard.py) extras, on top of the pipeline environment (see SERVER.md):
+#   uv pip install -r experiments/perturbation_direction/dashboard_requirements.txt
+# Streamlit >= 1.35 is needed for plotly click/selection events; these are the tested versions.
+streamlit==1.65.0
+plotly==7.1.0

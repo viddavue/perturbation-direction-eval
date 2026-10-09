@@ -9,9 +9,35 @@ ground_truth.py  real Δ (perturbed − control, mean log1p CP10k), Wilcoxon DEG
 generate.py      scLDM profiles per condition with paired noise (same z for every condition)
 baselines.py     transfer (mean / per line), generic shift, calibrated (ridge) and kNN transfer
 transfer_models.py  calibrated + kNN cross-context predictors (fit on target-context TRAIN perturbations only)
+learned_baselines.py  trained direction classifiers ported from perturbational_effect_pw (prior/bilinear/MLP/GBDT)
+direction_models.py   their models + SVD gene/perturbation embeddings
 evaluate.py      per-perturbation metrics, summary table, specificity (shuffled) control, plots
 metrics.py       pure metric functions (tested in tests/test_direction_metrics.py)
 ```
+
+## Dashboard
+
+An interactive explorer for any evaluation run (`evaluate.py` output directory):
+
+```bash
+uv pip install -r experiments/perturbation_direction/dashboard_requirements.txt   # once
+streamlit run experiments/perturbation_direction/dashboard.py -- --root outputs/perturbation_direction
+```
+
+| view | what it shows |
+|---|---|
+| **Perturbation** | One perturbation: each method's predicted vs true effect per gene. Panels show which DEGs have the right or wrong sign, the metrics for this perturbation, and a searchable gene table (CSV download). |
+| **Overview** | The median and IQR of the chosen metric per method, against the noise ceiling and chance. The full effect and the perturbation-specific part side by side. evaluate.py's summary table. |
+| **Strength & distributions** | Median score by perturbation strength (adjustable bins), and per-perturbation scores as box plus dots. |
+| **Head-to-head** | Two methods compared perturbation by perturbation, colored by number of DEGs. |
+
+- **Sidebar:** pick the run, the report (full effect / perturbation-specific), the methods, the metric and the
+  minimum number of true DEGs.
+- **Navigation:** clicking a perturbation in any chart opens it in the Perturbation view.
+- **Gene-level views** need the `methods.json` manifest that `evaluate.py` writes. Re-run `evaluate.py` for
+  runs made before the manifest existed.
+- **On the server:** run `streamlit run … --server.port 8501` there, then
+  `ssh -L 8501:localhost:8501 <server>` and open http://localhost:8501.
 
 ## Design decisions
 
@@ -40,6 +66,16 @@ metrics.py       pure metric functions (tested in tests/test_direction_metrics.p
   - knn: the HepG2 effects of the training perturbations that behave most similarly in the other lines.
   - The calibrated and kNN baselines are fitted only on the 968 HepG2 training perturbations, with
     hyperparameters chosen by 5-fold cross-validation. Test perturbations are never used for fitting.
+- **Trained classifiers** (`learned_baselines.py`): the prior, bilinear, MLP and GBDT models from
+  perturbational_effect_pw, which predict P(up) for (perturbation, gene, cell line).
+  - Training labels are the significant genes (Welch t-test, BH < 0.05, |Δ| > 0.1) of every training
+    perturbation in every cell line, including HepG2's 968 training perturbations. Test perturbations never
+    appear.
+  - Gene embeddings come from SVD of training effects. A target gene is described by its responses across
+    all training perturbations; a perturbation by its effect profiles in the other cell lines only, so train
+    and test perturbations are represented the same way.
+  - The GBDT gets a one-hot cell line. The original had no cell-line feature, so it averaged over lines.
+  - Output is P(up) − 0.5, so `evaluate.py` scores its sign like any other baseline.
 - **Perturbation-specific report** (`--specific-ref`). Many CRISPRi knockdowns share a stress or
   proliferation signature g, so plain sign accuracy can be high for a model that only learned it.
   - **Scored quantity:** the sign of r = Δ − β·g, where β is fitted per perturbation by least squares,

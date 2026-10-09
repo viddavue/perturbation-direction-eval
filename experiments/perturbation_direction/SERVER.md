@@ -107,6 +107,16 @@ python $E/baselines.py --train-h5ad $TRAIN --pert-key gene --control non-targeti
 cells, and 86 of them have fewer than 40, so the default of 20 would drop those 86. With 15, all 372 are
 kept.
 
+Optional: trained classifiers (prior / bilinear / MLP / GBDT). This takes about 10 minutes on CPU for the labels, plus a
+short GPU training run:
+
+```bash
+python $E/learned_baselines.py --train-h5ad $TRAIN --truth-dir $O/truth --pert-key gene --control non-targeting \
+  --context-key cell_line --target-context hepg2 --out-dir $O/learned
+```
+
+Add them to step 6 with `--baseline mlp=$O/learned/delta_mlp.parquet gbdt=$O/learned/delta_gbdt.parquet ...`.
+
 ## 6. Evaluate (CPU, seconds)
 
 ```bash
@@ -130,3 +140,12 @@ This writes two reports:
 To evaluate on your PC instead, copy back only the small files:
 `rsync -a server:scldm/outputs/perturbation_direction/replogle/pred/*.parquet outputs/perturbation_direction/replogle/pred/`.
 Each one is about 6 MB.
+
+## 7. Dashboard (optional)
+
+```bash
+uv pip install -r experiments/perturbation_direction/dashboard_requirements.txt
+streamlit run experiments/perturbation_direction/dashboard.py --server.port 8501 --server.headless true \
+  -- --root outputs/perturbation_direction
+# on your PC:  ssh -L 8501:localhost:8501 <server>   then open http://localhost:8501
+```
