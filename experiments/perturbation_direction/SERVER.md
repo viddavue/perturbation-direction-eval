@@ -98,10 +98,14 @@ python $E/audit.py --train-h5ad $TRAIN --test-h5ad $TEST \
   --pert-key gene --control non-targeting --context-key cell_line --target-context hepg2 \
   --size-factor-pkl $A/replogle_log_size_factor_munew.pkl --ckpt $A/replogle_negative_binomial.ckpt
 python $E/ground_truth.py --pert-h5ad $TEST --ctrl-h5ad $TRAIN --pert-key gene --control non-targeting \
-  --context cell_line=hepg2 --metadata-json metadata/replogle_train.json --out-dir $O/truth
+  --context cell_line=hepg2 --metadata-json metadata/replogle_train.json --min-cells 15 --out-dir $O/truth
 python $E/baselines.py --train-h5ad $TRAIN --pert-key gene --control non-targeting \
   --context-key cell_line --target-context hepg2 --truth-dir $O/truth --out-dir $O/baselines
 ```
+
+`--min-cells 15` is applied per half for the split-half ceiling. The HepG2 test perturbations have 30–433
+cells, and 86 of them have fewer than 40, so the default of 20 would drop those 86. With 15, all 372 are
+kept.
 
 ## 6. Evaluate (CPU, seconds)
 

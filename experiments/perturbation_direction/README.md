@@ -75,7 +75,7 @@ python $E/audit.py --train-h5ad $TRAIN --test-h5ad $TEST \
   --size-factor-pkl $A/replogle_log_size_factor_munew.pkl --ckpt $A/replogle_negative_binomial.ckpt
 
 python $E/ground_truth.py --pert-h5ad $TEST --ctrl-h5ad $TRAIN --pert-key gene --control non-targeting \
-  --context cell_line=hepg2 --metadata-json metadata/replogle_train.json --out-dir $O/truth
+  --context cell_line=hepg2 --metadata-json metadata/replogle_train.json --min-cells 15 --out-dir $O/truth
 
 python $E/baselines.py --train-h5ad $TRAIN --pert-key gene --control non-targeting \
   --context-key cell_line --target-context hepg2 --truth-dir $O/truth --out-dir $O/baselines
