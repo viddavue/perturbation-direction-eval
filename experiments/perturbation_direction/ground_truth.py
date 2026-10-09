@@ -198,6 +198,11 @@ def main(argv=None):
         )
         rows.append({"perturbation": p, **m})
     pd.DataFrame(rows).set_index("perturbation").to_csv(out / "ceiling.csv")
+    # halves saved so evaluate.py can build ceilings for derived targets (e.g. effect minus generic shift)
+    for name, df in (("delta_half_a", d_a), ("delta_half_b", d_b), ("deg_half_a", deg_a)):
+        df = df.copy()
+        df.index = [i.rsplit("|", 1)[0] for i in df.index]
+        df.to_parquet(out / f"{name}.parquet")
 
     # conditions for generation: control first, then perturbations, all within the context
     cond = pd.DataFrame({"id": [args.control, *perts], args.pert_key: [args.control, *perts]})

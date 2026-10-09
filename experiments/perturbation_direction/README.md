@@ -7,7 +7,8 @@ prepare_replogle_state.py  STATE Replogle-Nadig file -> scLDM-style train/test c
 audit.py         fail-fast checks: counts layer, gene/label vocab, split structure, size factors, EMA
 ground_truth.py  real Δ (perturbed − control, mean log1p CP10k), Wilcoxon DEGs, split-half noise ceiling
 generate.py      scLDM profiles per condition with paired noise (same z for every condition)
-baselines.py     cross-context transfer + generic perturbation shift (from training cells)
+baselines.py     transfer (mean / per line), generic shift, calibrated (ridge) and kNN transfer
+transfer_models.py  calibrated + kNN cross-context predictors (fit on target-context TRAIN perturbations only)
 evaluate.py      per-perturbation metrics, summary table, specificity (shuffled) control, plots
 metrics.py       pure metric functions (tested in tests/test_direction_metrics.py)
 ```
@@ -32,8 +33,16 @@ metrics.py       pure metric functions (tested in tests/test_direction_metrics.p
   - noise ceiling: DEGs and directions from one random half of the cells, scored on the other half. It
     is slightly pessimistic, since each half has only half the cells.
   - shuffled: each perturbation is scored with another perturbation's prediction, to test specificity.
-  - transfer: the same perturbation's measured effect in other cell lines.
-  - generic: the average perturbation effect.
+  - transfer: the same perturbation's measured effect in other cell lines, averaged over them
+    (`transfer`) or taken from one line (`transfer_<line>`).
+  - generic: the average effect of the HepG2 training perturbations, i.e. the shared response.
+  - calibrated: for each gene, a ridge regression from the other lines' effects to the HepG2 effect.
+  - knn: the HepG2 effects of the training perturbations that behave most similarly in the other lines.
+  - The calibrated and kNN baselines are fitted only on the 968 HepG2 training perturbations, with
+    hyperparameters chosen by 5-fold cross-validation. Test perturbations are never used for fitting.
+- **Perturbation-specific report** (`--specific-ref`): scores the sign of (Δ − shared response). Many
+  CRISPRi knockdowns share a stress or proliferation signature, so plain sign accuracy can be high for a
+  model that only learned that signature.
 
 ## Replogle (GPU machine, batch size 32)
 

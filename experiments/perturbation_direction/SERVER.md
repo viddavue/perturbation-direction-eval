@@ -110,8 +110,17 @@ python $E/evaluate.py --truth-dir $O/truth --exclude-target \
   --pred scLDM_w1=$O/pred/w1.parquet scLDM_w1_ema=$O/pred/w1_ema.parquet \
          scLDM_w2=$O/pred/w2.parquet scLDM_w4=$O/pred/w4.parquet scLDM_w1_counts=$O/pred/w1_sample.parquet \
   --baseline transfer=$O/baselines/delta_transfer.parquet generic=$O/baselines/delta_generic.parquet \
-  --out-dir $O/eval
+             calibrated=$O/baselines/delta_calibrated.parquet knn=$O/baselines/delta_knn.parquet \
+             transfer_k562=$O/baselines/delta_transfer_k562.parquet transfer_rpe1=$O/baselines/delta_transfer_rpe1.parquet \
+             transfer_jurkat=$O/baselines/delta_transfer_jurkat.parquet \
+  --specific-ref $O/baselines/delta_generic.parquet --out-dir $O/eval
 ```
+
+This writes two reports:
+- `summary.csv` scores the direction of the full effect.
+- `summary_specific.csv` scores the direction of the perturbation-specific part (effect minus the shared
+  response that every HepG2 perturbation shows). It tells you whether a model gets more right than the
+  shared response.
 
 To evaluate on your PC instead, copy back only the small files:
 `rsync -a server:scldm/outputs/perturbation_direction/replogle/pred/*.parquet outputs/perturbation_direction/replogle/pred/`.
