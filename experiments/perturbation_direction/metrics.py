@@ -24,6 +24,21 @@ def log1p_cp10k(X) -> np.ndarray:
     return np.log1p(X / lib * 1e4)
 
 
+def benjamini_hochberg(p) -> np.ndarray:
+    """BH-adjusted p-values for a 1-D array (NaNs stay NaN)."""
+    p = np.asarray(p, dtype=np.float64)
+    out = np.full_like(p, np.nan)
+    ok = np.isfinite(p)
+    q = p[ok]
+    if q.size:
+        order = np.argsort(q)
+        ranked = q[order] * q.size / np.arange(1, q.size + 1)
+        adj = np.empty_like(q)
+        adj[order] = np.clip(np.minimum.accumulate(ranked[::-1])[::-1], 0, 1)
+        out[ok] = adj
+    return out
+
+
 def mean_delta(X_pert: np.ndarray, X_ctrl: np.ndarray) -> np.ndarray:
     """Pseudobulk effect: per-gene mean of perturbed cells minus mean of control cells."""
     return np.asarray(X_pert).mean(axis=0) - np.asarray(X_ctrl).mean(axis=0)

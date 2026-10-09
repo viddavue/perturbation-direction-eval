@@ -99,6 +99,50 @@ def group_means(adata: ad.AnnData, key: str) -> pd.DataFrame:
     return pd.DataFrame(sums / counts[:, None], index=cats, columns=adata.var_names)
 
 
+def group_stats(adata: ad.AnnData, key: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
+    """Per-group mean, unbiased variance and size of adata.X, via sparse indicator matmuls."""
+    labels = adata.obs[key].astype(str)
+    cats = pd.Index(sorted(labels.unique()))
+    ind = sparse.csr_matrix(
+        (np.ones(adata.n_obs), (cats.get_indexer(labels), np.arange(adata.n_obs))), shape=(len(cats), adata.n_obs)
+    )
+    X = adata.X
+    dense = lambda m: np.asarray(m.todense()) if sparse.issparse(m) else np.asarray(m)
+    sums = dense(ind @ X)
+    sq = dense(ind @ (X.multiply(X) if sparse.issparse(X) else X * X))
+    n = np.asarray(ind.sum(1)).ravel()
+    mean = sums / n[:, None]
+    var = np.clip(sq - n[:, None] * mean**2, 0, None) / np.maximum(n - 1, 1)[:, None]
+    return (
+        pd.DataFrame(mean, index=cats, columns=adata.var_names),
+        pd.DataFrame(var, index=cats, columns=adata.var_names),
+        pd.Series(n, index=cats),
+    )
+
+
+def welch_degs(mean, var, n, control: str, perts: list[str], alpha: float, min_lfc: float):
+    """Effects and DEG masks for each perturbation vs control: Welch t-test, BH within perturbation, |delta| > min_lfc.
+
+    Returns (delta, padj) as perturbation x gene frames.
+    """
+    from metrics import benjamini_hochberg
+    from scipy.stats import t as t_dist
+
+    delta = mean.loc[perts] - mean.loc[control]
+    se2_p = var.loc[perts].to_numpy() / n.loc[perts].to_numpy()[:, None]
+    se2_c = var.loc[control].to_numpy() / n.loc[control]
+    se = np.sqrt(se2_p + se2_c)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        tstat = delta.to_numpy() / se
+        df = (se2_p + se2_c) ** 2 / (
+            se2_p**2 / np.maximum(n.loc[perts].to_numpy()[:, None] - 1, 1) + se2_c**2 / max(n.loc[control] - 1, 1)
+        )
+    p = 2 * t_dist.sf(np.abs(np.nan_to_num(tstat)), np.nan_to_num(df, nan=1.0))
+    p[se == 0] = 1.0  # genes without variance in both groups carry no evidence
+    padj = np.vstack([benjamini_hochberg(row) for row in p])
+    return delta, pd.DataFrame(padj, index=delta.index, columns=delta.columns)
+
+
 def wilcoxon_padj(adata: ad.AnnData, key: str, groups: list[str], reference: str) -> pd.DataFrame:
     """BH-adjusted Wilcoxon p-values, group x gene."""
     sc.tl.rank_genes_groups(
