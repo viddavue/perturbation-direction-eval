@@ -122,9 +122,10 @@ python $E/evaluate.py --truth-dir $O/truth --exclude-target \
 
 This writes two reports:
 - `summary.csv` scores the direction of the full effect.
-- `summary_specific.csv` scores the direction of the perturbation-specific part (effect minus the shared
-  response that every HepG2 perturbation shows). It tells you whether a model gets more right than the
-  shared response.
+- `summary_specific.csv` scores the direction of the perturbation-specific part: the effect with the
+  shared HepG2 response projected out, scaled per perturbation. It tells you whether a model gets more
+  right than the shared response. Its `shared_strength_corr` column says how well a model predicts how
+  strongly each perturbation triggers that shared response.
 
 To evaluate on your PC instead, copy back only the small files:
 `rsync -a server:scldm/outputs/perturbation_direction/replogle/pred/*.parquet outputs/perturbation_direction/replogle/pred/`.

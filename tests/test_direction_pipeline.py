@@ -234,4 +234,5 @@ def test_learned_baselines_and_specific_report(tmp_path):
     assert "generic" not in sp.index  # identical to the reference -> nothing left to score
     assert sp.loc["transfer", "balanced_acc_median"] < 0.75  # other lines' specific response is unrelated
     assert "noise ceiling (split-half)" in sp.index
+    assert "shared_strength_corr" in sp.columns and sp["shared_strength_corr"].notna().any()
     assert (out / "accuracy_by_strength_specific.png").exists()

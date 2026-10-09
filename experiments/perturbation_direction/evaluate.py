@@ -28,7 +28,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from metrics import evaluate, shuffled_prediction, summarize
+from metrics import evaluate, remove_shared, shuffled_prediction, summarize
 
 STRENGTH_BINS = [5, 20, 100, 500, np.inf]
 # reference categorical palette (fixed order, light mode) + text/grid tokens
@@ -52,17 +52,22 @@ def style_axes(ax):
 
 
 def plot_by_strength(by_strength: pd.DataFrame, path: pathlib.Path):
-    fig, ax = plt.subplots(figsize=(7.5, 4.2), facecolor=SURFACE)
+    """One line per method; a "(shuffled)" control shares its model's color (dashed), ceiling in gray."""
+    fig, ax = plt.subplots(figsize=(9, 4.2), facecolor=SURFACE)
     style_axes(ax)
     bins = list(by_strength.columns)
     x = np.arange(len(bins))
-    # ceiling drawn first (underneath); model colors follow the method's position, not draw order
-    methods = [m for m in by_strength.index if not m.startswith("noise ceiling")]
-    order = [m for m in by_strength.index if m.startswith("noise ceiling")] + methods
+    base = lambda m: m.removesuffix(" (shuffled)")
+    entities = list(dict.fromkeys(base(m) for m in by_strength.index if not m.startswith("noise ceiling")))
+    if len(entities) > len(SERIES):
+        raise ValueError(f"{len(entities)} methods to plot but only {len(SERIES)} distinct colors")
+    # ceiling drawn first (underneath); colors follow the method, not draw order
+    order = [m for m in by_strength.index if m.startswith("noise ceiling")]
+    order += [m for m in by_strength.index if not m.startswith("noise ceiling")]
     for method in order:
         row = by_strength.loc[method]
         is_ceiling = method.startswith("noise ceiling")
-        color = TEXT_2 if is_ceiling else SERIES[methods.index(method) % len(SERIES)]
+        color = TEXT_2 if is_ceiling else SERIES[entities.index(base(method))]
         ls = "--" if "shuffled" in method or is_ceiling else "-"
         ax.plot(
             x,
@@ -82,9 +87,10 @@ def plot_by_strength(by_strength: pd.DataFrame, path: pathlib.Path):
     ax.set_xticks(x, bins)
     ax.set_xlabel("true DEGs per perturbation", color=TEXT_2, fontsize=9)
     ax.set_ylabel("median balanced sign accuracy", color=TEXT_2, fontsize=9)
-    ax.set_ylim(0.3, 1.0)
+    lowest = np.nanmin(by_strength.to_numpy()) if by_strength.size else 0.3
+    ax.set_ylim(min(0.3, np.floor((lowest - 0.05) * 10) / 10), 1.0)
     ax.set_title("Direction accuracy by perturbation strength", color=TEXT, fontsize=11, loc="left")
-    ax.legend(frameon=False, fontsize=8, loc="lower right", labelcolor=TEXT_2)
+    ax.legend(frameon=False, fontsize=8, loc="upper left", bbox_to_anchor=(1.01, 1.0), labelcolor=TEXT_2)
     fig.tight_layout()
     fig.savefig(path, dpi=150)
     plt.close(fig)
@@ -111,7 +117,7 @@ def plot_head_to_head(a: pd.Series, b: pd.Series, name_a: str, name_b: str, path
     plt.close(fig)
 
 
-def report(methods, delta_true, deg, ceiling, exclude, args, out: pathlib.Path, tag: str, target_down: dict):
+def report(methods, delta_true, deg, ceiling, exclude, args, out: pathlib.Path, tag: str, extra_cols: dict):
     """Score every method, write summary/by_strength/per-perturbation tables and plots (suffixed by tag)."""
     (out / f"per_perturbation{tag}").mkdir(parents=True, exist_ok=True)
     per_pert = {name: evaluate(d, delta_true, deg, exclude_genes=exclude, eps=args.eps) for name, d in methods.items()}
@@ -138,8 +144,9 @@ def report(methods, delta_true, deg, ceiling, exclude, args, out: pathlib.Path, 
         rows[name]["n_perturbations_total"] = len(df)
         strength[name] = df["balanced_acc"].groupby(bins.reindex(df.index), observed=False).median()
     summary = pd.DataFrame(rows).T
-    if target_down:
-        summary["target_gene_down_frac"] = pd.Series(target_down)
+    for col, values in extra_cols.items():  # per-method scalars, e.g. target_gene_down_frac
+        if values:
+            summary[col] = pd.Series(values)
     cols = [
         "n_perturbations",
         "sign_acc_median",
@@ -167,7 +174,12 @@ def report(methods, delta_true, deg, ceiling, exclude, args, out: pathlib.Path, 
         )
         print(by_strength)
 
-    plot_by_strength(by_strength, out / f"accuracy_by_strength{tag}.png")
+    # plot: first model (+ its shuffled control), pooled baselines (per-line transfers stay in the tables), ceiling
+    first = [n for n in parse_named(args.pred) if n in by_strength.index][:1]
+    plotted = first + [f"{n} (shuffled)" for n in first if f"{n} (shuffled)" in by_strength.index]
+    plotted += [n for n in parse_named(args.baseline) if n in by_strength.index and not n.startswith("transfer_")]
+    plotted = plotted[: len(SERIES) + 1] + [n for n in by_strength.index if n.startswith("noise ceiling")]
+    plot_by_strength(by_strength.loc[plotted], out / f"accuracy_by_strength{tag}.png")
     # first model vs the strongest baseline (by median balanced accuracy) in this report
     preds = [n for n in parse_named(args.pred) if n in per_pert]
     bases = [n for n in parse_named(args.baseline) if n in per_pert]
@@ -194,7 +206,8 @@ def main(argv=None):
     ap.add_argument(
         "--specific-ref",
         help="effect matrix of the shared response (e.g. baselines/delta_generic.parquet); adds a second report "
-        "scoring the direction of (effect - shared response), i.e. the perturbation-specific part",
+        "scoring the direction of the perturbation-specific part (effect - beta_p * shared, beta_p fitted per "
+        "perturbation) and how well each method predicts beta_p (shared_strength_corr)",
     )
     ap.add_argument("--out-dir", required=True)
     args = ap.parse_args(argv)
@@ -224,24 +237,47 @@ def main(argv=None):
         methods[name] = pd.read_parquet(path)
 
     ceiling = pd.read_csv(truth_dir / "ceiling.csv", index_col=0)
-    report(methods, delta_true, deg, ceiling, exclude, args, out, "", target_down)
+    report(methods, delta_true, deg, ceiling, exclude, args, out, "", {"target_gene_down_frac": target_down})
 
     if args.specific_ref:
-        # perturbation-specific component: subtract the shared response from truth and every prediction
-        ref = pd.read_parquet(args.specific_ref)
-        ref_vec = ref.mean() if len(ref) else None
+        # perturbation-specific component: project the shared response out of truth and every prediction,
+        # per perturbation (d - beta_p * shared), so neither its direction nor its strength is scored here
+        ref_vec = pd.read_parquet(args.specific_ref).mean()
         min_lfc = info.get("min_lfc", 0.1)
-        true_s = delta_true - ref_vec
+        true_s, beta_true = remove_shared(delta_true, ref_vec)
         deg_s = deg & (true_s.abs() > min_lfc)
-        methods_s = {n: d - ref_vec for n, d in methods.items() if not np.allclose(d.to_numpy(), ref_vec.to_numpy())}
+        scored = deg_s.index[deg_s.sum(1) >= args.min_degs]  # perturbations used for shared_strength_corr
+
+        def corr(a: pd.Series, b: pd.Series) -> float:
+            common = a.index.intersection(b.index).intersection(scored)
+            return float(np.corrcoef(a[common], b[common])[0, 1]) if len(common) > 2 else np.nan
+
+        methods_s, strength_corr = {}, {}
+        for n, d in methods.items():
+            resid, beta = remove_shared(d, ref_vec)
+            if np.allclose(np.nan_to_num(resid.to_numpy()), 0, atol=1e-9):
+                continue  # pure shared-response prediction (e.g. generic): nothing specific to score
+            methods_s[n] = resid
+            strength_corr[n] = corr(beta, beta_true)
         ceiling_s = None
         if (truth_dir / "delta_half_a.parquet").exists():
-            d_a = pd.read_parquet(truth_dir / "delta_half_a.parquet") - ref_vec
-            d_b = pd.read_parquet(truth_dir / "delta_half_b.parquet") - ref_vec
+            d_a, beta_a = remove_shared(pd.read_parquet(truth_dir / "delta_half_a.parquet"), ref_vec)
+            d_b, beta_b = remove_shared(pd.read_parquet(truth_dir / "delta_half_b.parquet"), ref_vec)
             deg_a = pd.read_parquet(truth_dir / "deg_half_a.parquet") & (d_a.abs() > min_lfc)
             ceiling_s = evaluate(d_b, d_a, deg_a, exclude_genes=exclude, eps=args.eps)
-        print("\n=== perturbation-specific component (effect minus shared response) ===")
-        report(methods_s, true_s, deg_s, ceiling_s, exclude, args, out, "_specific", {})
+            strength_corr["noise ceiling (split-half)"] = corr(beta_b, beta_a)
+        print("\n=== perturbation-specific component (effect with the shared response projected out) ===")
+        report(
+            methods_s,
+            true_s,
+            deg_s,
+            ceiling_s,
+            exclude,
+            args,
+            out,
+            "_specific",
+            {"shared_strength_corr": strength_corr},
+        )
     print(f"\nwrote {out}")
 
 

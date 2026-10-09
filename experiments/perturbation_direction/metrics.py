@@ -120,6 +120,19 @@ def evaluate(
     return pd.DataFrame(rows).set_index("perturbation")
 
 
+def remove_shared(delta: pd.DataFrame, ref: pd.Series) -> tuple[pd.DataFrame, pd.Series]:
+    """Project a shared response vector out of every perturbation's effect.
+
+    Each row d becomes d - beta * ref with beta = <d, ref> / <ref, ref> (least squares, per perturbation),
+    so both the direction and the strength of the shared response are removed. Returns (residual, beta).
+    """
+    r = ref.reindex(delta.columns).to_numpy(dtype=np.float64)
+    d = delta.to_numpy(dtype=np.float64)
+    beta = np.nan_to_num(d) @ r / (r @ r)
+    resid = pd.DataFrame(d - np.outer(beta, r), index=delta.index, columns=delta.columns)
+    return resid, pd.Series(beta, index=delta.index)
+
+
 def derange(index: pd.Index, seed: int = 0) -> pd.Index:
     """Random permutation of ``index`` with no fixed points (each perturbation gets another's prediction)."""
     if len(index) < 2:

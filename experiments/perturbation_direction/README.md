@@ -40,9 +40,17 @@ metrics.py       pure metric functions (tested in tests/test_direction_metrics.p
   - knn: the HepG2 effects of the training perturbations that behave most similarly in the other lines.
   - The calibrated and kNN baselines are fitted only on the 968 HepG2 training perturbations, with
     hyperparameters chosen by 5-fold cross-validation. Test perturbations are never used for fitting.
-- **Perturbation-specific report** (`--specific-ref`): scores the sign of (Δ − shared response). Many
-  CRISPRi knockdowns share a stress or proliferation signature, so plain sign accuracy can be high for a
-  model that only learned that signature.
+- **Perturbation-specific report** (`--specific-ref`). Many CRISPRi knockdowns share a stress or
+  proliferation signature g, so plain sign accuracy can be high for a model that only learned it.
+  - **Scored quantity:** the sign of r = Δ − β·g, where β is fitted per perturbation by least squares,
+    separately for the observed and for each predicted Δ. A gene is a specific DEG if it is a DEG and
+    |r| > 0.1.
+  - **Why β is fitted per perturbation:** knockdowns differ in how *strongly* they trigger g, not only
+    whether they do. Subtracting the average g leaves that strength in the residual: strong perturbations
+    look like +g and weak ones like −g. Shuffled predictions then score below chance, and accuracy rewards
+    predicting strength rather than the perturbation-specific pattern.
+  - **Strength reported separately:** `shared_strength_corr` is the correlation between predicted and
+    observed β across perturbations.
 
 ## Replogle (GPU machine, batch size 32)
 

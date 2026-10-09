@@ -116,3 +116,21 @@ def test_log1p_cp10k_dense_and_sparse_agree():
     np.testing.assert_allclose(d, s)
     np.testing.assert_allclose(np.expm1(d[0]).sum(), 1e4)
     assert np.all(d[1] == 0)
+
+
+def test_remove_shared_projects_out_direction_and_strength():
+    from metrics import remove_shared
+
+    ref = pd.Series([1.0, 1.0, 0.0, 0.0], index=list("abcd"))
+    specific = np.array([0.0, 0.0, 2.0, -1.0])
+    delta = pd.DataFrame(
+        [3 * ref.to_numpy() + specific, -0.5 * ref.to_numpy(), ref.to_numpy() + [1.0, -1.0, 0.0, 0.0]],
+        index=["strong", "opposite", "tilted"],
+        columns=list("abcd"),
+    )
+    resid, beta = remove_shared(delta, ref)
+    np.testing.assert_allclose(beta, [3.0, -0.5, 1.0])
+    np.testing.assert_allclose(resid.loc["strong"], specific, atol=1e-12)  # strength removed, not just the mean
+    np.testing.assert_allclose(resid.loc["opposite"], 0, atol=1e-12)
+    np.testing.assert_allclose(resid.loc["tilted"], [1.0, -1.0, 0.0, 0.0], atol=1e-12)  # orthogonal part kept
+    np.testing.assert_allclose(resid.to_numpy() @ ref.to_numpy(), 0, atol=1e-12)
