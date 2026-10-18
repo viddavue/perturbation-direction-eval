@@ -261,7 +261,8 @@ def main(argv=None):
         methods[name] = pd.read_parquet(path)
 
     write_manifest(args, out, info["control"])
-    ceiling = pd.read_csv(truth_dir / "ceiling.csv", index_col=0)
+    ceiling_path = truth_dir / "ceiling.csv"
+    ceiling = pd.read_csv(ceiling_path, index_col=0) if ceiling_path.exists() else None
     report(methods, delta_true, deg, ceiling, exclude, args, out, "", {"target_gene_down_frac": target_down})
 
     if args.specific_ref:

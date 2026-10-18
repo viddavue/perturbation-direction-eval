@@ -34,6 +34,10 @@ SETUP_NOTES.md
 # notebook checkpoints
 **/.ipynb_checkpoints/
 
+# reference clones and third-party code (read-only, not vendored)
+/scDEBART/
+.pybiomart.sqlite
+
 # model assets and artifacts (mostly large files)
 _artifacts/
 
