@@ -17,6 +17,12 @@ metrics.py       pure metric functions (tested in tests/test_direction_metrics.p
 
 ## Dashboard
 
+### VCC-2026-oriented experiments
+
+See [VCC_EXPERIMENTS.md](VCC_EXPERIMENTS.md) for the pinned official metric implementation,
+fixed-panel effect retrieval, the denoising/filtering ablation, and a cell-level DE pilot.
+These are local Replogle diagnostics, not official Challenge leaderboard scores.
+
 An interactive explorer for any evaluation run (`evaluate.py` output directory):
 
 ```bash

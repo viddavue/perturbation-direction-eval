@@ -156,6 +156,15 @@ the failures above, but it removes a variable.
 
 ## Results (our split, 1,784 genes, scVI target, paired n=215)
 
+**Conditioning audit warning (supersedes the interpretation below):** the actual prediction
+archive contains its target gene among the input tokens for only **51 of 321** perturbations.
+For the other **270**, the code's -10 perturbation indicator is entirely zero. Restricting the
+input sequence to the scored HVGs therefore removed the identity signal for most examples.
+The table below describes this restricted-input run; it is NOT a valid basis for comparing
+scDEBART's perturbation-prediction capability with scLDM. A corrected reproduction must keep
+the target gene in the input sequence even when that gene is excluded from the scored output.
+Run `scdebart_conditioning_audit.py --npz <archive> --out-dir <audit>` to reproduce the check.
+
 | method | balanced acc | AUROC | Spearman on DEGs |
 |---|---|---|---|
 | kNN | 0.923 | 0.994 | 0.882 |

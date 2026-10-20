@@ -19,6 +19,7 @@ Example:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import pathlib
@@ -154,6 +155,7 @@ RUN_KEYS = (
     "library_size",
     "seed",
     "fp32",
+    "save_cells",
 )
 
 
@@ -174,6 +176,7 @@ def check_run_settings(args) -> None:
     path = d / "settings.json"
     if path.exists():
         old = json.loads(path.read_text())
+        old.setdefault("save_cells", False)  # old profile-only runs remain resumable
         if old != json.loads(json.dumps(settings)):
             raise SystemExit(
                 f"{path} was written with different settings:\n  old {old}\n  new {settings}\n"
@@ -188,6 +191,30 @@ def save_rows(rows: dict, gene_names: np.ndarray, path: pathlib.Path) -> None:
     tmp = path.with_suffix(".tmp")
     df.to_parquet(tmp)
     tmp.replace(path)  # atomic: an interrupted write never leaves a corrupt part
+
+
+def cell_path(out: pathlib.Path, cid: str) -> pathlib.Path:
+    """Stable, filesystem-safe path independent of shard count."""
+    return parts_dir(out) / "cells" / (hashlib.sha256(cid.encode()).hexdigest() + ".h5ad")
+
+
+def save_count_cells(counts, gene_names, condition: dict, path: pathlib.Path):
+    """Persist actual NB samples, never repeated means. Used for the DE pilot only."""
+    import anndata as ad
+    from scipy import sparse
+
+    counts = np.asarray(counts)
+    if counts.ndim != 2 or counts.shape[1] != len(gene_names):
+        raise ValueError("count matrix/gene shape mismatch")
+    if not np.isfinite(counts).all() or (counts < 0).any() or not np.equal(counts, np.floor(counts)).all():
+        raise ValueError("NB readout must be finite nonnegative integer counts")
+    obs = pd.DataFrame({k: [v] * len(counts) for k, v in condition.items()},
+                       index=[f"{condition['id']}_{i}" for i in range(len(counts))])
+    data = ad.AnnData(sparse.csr_matrix(counts), obs=obs, var=pd.DataFrame(index=gene_names))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp.h5ad")
+    data.write_h5ad(tmp, compression="gzip")
+    tmp.replace(path)
 
 
 def run_shard(args, shard: int, num_shards: int) -> None:
@@ -205,6 +232,8 @@ def run_shard(args, shard: int, num_shards: int) -> None:
     finished = set()
     for part in parts_dir(pathlib.Path(args.out)).glob("shard*of*[0-9].parquet"):
         finished |= set(pd.read_parquet(part).index)
+    if args.save_cells:
+        finished = {cid for cid in finished if cell_path(pathlib.Path(args.out), cid).exists()}
     rows_mean = pd.read_parquet(out_mean).to_dict("index") if out_mean.exists() else {}
     rows_sample = pd.read_parquet(out_sample).to_dict("index") if out_sample.exists() else {}
     rows_mean = {k: np.array([v[g] for g in gene_names]) for k, v in rows_mean.items()}
@@ -233,6 +262,7 @@ def run_shard(args, shard: int, num_shards: int) -> None:
         sum_mean = torch.zeros(len(gene_names), dtype=torch.float64)
         sum_sample = torch.zeros(len(gene_names), dtype=torch.float64)
         done = 0
+        count_batches = []
         for b in range(n_batches):
             bs = min(args.batch_size, args.n_cells - done)
             # identical noise for batch b in every condition (and on every shard) -> paired comparison
@@ -241,13 +271,20 @@ def run_shard(args, shard: int, num_shards: int) -> None:
             condition = {k: torch.full((bs,), int(cond_idx[k][row_i]), device=args.device) for k in keys}
             z1 = sample_fn(z, velocity, condition=condition)[-1]
             cp10k, theta = decode_expected(module.vae_model, z1, genes, args.gene_chunk)
+            if args.save_cells and theta is None:
+                raise ValueError("--save-cells requires an NB head; Gaussian readouts are not raw counts")
             sum_mean += torch.log1p(cp10k).sum(0).double().cpu()
             if args.library_size is not None and theta is not None:
                 torch.manual_seed(args.seed * 100_003 + b + 7)
                 counts = NegativeBinomial(mu=cp10k * (args.library_size / 1e4), theta=theta).sample()
+                if args.save_cells:
+                    count_batches.append(counts.cpu().numpy())
                 lib = counts.sum(1, keepdim=True).clamp(min=1)
                 sum_sample += torch.log1p(counts / lib * 1e4).sum(0).double().cpu()
             done += bs
+        if args.save_cells:
+            save_count_cells(np.concatenate(count_batches), gene_names, mine.iloc[row_i].to_dict(),
+                             cell_path(pathlib.Path(args.out), cid))
         rows_mean[cid] = (sum_mean / done).numpy()
         save_rows(rows_mean, gene_names, out_mean)
         if args.library_size is not None:
@@ -274,6 +311,14 @@ def merge(args) -> None:
         dst = out.with_name(out.stem + suffix + ".parquet")
         df.to_parquet(dst)
         logger.info(f"wrote {dst} ({len(df)} conditions)")
+    if args.save_cells:
+        import anndata as ad
+
+        paths = [cell_path(out, cid) for cid in conditions["id"]]
+        if not all(p.exists() for p in paths):
+            raise SystemExit("missing cell files: rerun generation with --save-cells")
+        cells = ad.concat([ad.read_h5ad(p) for p in paths], join="inner")
+        cells.write_h5ad(out.with_suffix(".h5ad"), compression="gzip")
 
 
 def launch_multi_gpu(args, gpus: list[str], argv: list[str]) -> None:
@@ -333,6 +378,7 @@ def main(argv=None):
     ap.add_argument("--guidance", type=float, default=1.0, help="CFG weight (applied to every key)")
     ap.add_argument("--ema", action="store_true", help="use EMA diffusion weights")
     ap.add_argument("--library-size", type=float, default=None, help="library size for NB count samples")
+    ap.add_argument("--save-cells", action="store_true", help="save actual NB cell counts alongside profiles (pilot)")
     ap.add_argument("--gene-chunk", type=int, default=4096)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument(
@@ -347,6 +393,8 @@ def main(argv=None):
     ap.add_argument("--num-shards", type=int, default=1)
     ap.add_argument("--merge-only", action="store_true", help="merge finished shards into --out")
     args = ap.parse_args(argv)
+    if args.save_cells and (args.library_size is None or args.library_size <= 0):
+        ap.error("--save-cells requires a positive --library-size")
 
     if args.merge_only:
         merge(args)

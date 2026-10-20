@@ -13,8 +13,8 @@ Faithful to their code (``Preprocess_perturbseq/cal_de_for_perturbseq.py``):
     target = lfc_median
 
 Deliberate differences, documented rather than hidden:
-  * **one DE seed, not their 50.** They average 50 seeds because they pretrain on these profiles;
-    here the target is a single estimate, so 1,000 posterior draws from one seed is used.
+  * **one DE seed, not their 50 resampled profiles per perturbation.** Here the target is
+    a single estimate, so 1,000 posterior draws from one seed is used.
   * the fit covers all HepG2 cells from the train and test files (their model is per dataset and
     includes every perturbation). Test perturbations appear only as *targets*, never as training
     labels for a compared model.
@@ -196,6 +196,11 @@ def main(argv=None) -> int:
     masked = mask_low_detection(lfc.to_numpy(), nz1.to_numpy(), nz2.to_numpy(), args.nonzero_threshold)
     target = pd.DataFrame(masked, index=perts, columns=genes)
     target.to_parquet(out / "delta_true.parquet")
+    # Keep unmasked estimates and detection independently: replacing low-detection effects
+    # with zero conflates denoising with filtering and cannot support a controlled ablation.
+    lfc.to_parquet(out / "delta_unmasked.parquet")
+    nz1.to_parquet(out / "detection_perturbed.parquet")
+    nz2.to_parquet(out / "detection_control.parquet")
     deg.to_parquet(out / "deg.parquet")
     proba.reindex(index=perts, columns=genes).to_parquet(out / "diagnostic_proba_de.parquet")
 

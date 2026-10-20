@@ -1,0 +1,2 @@
+# Optional evaluation environment; do not replace the training environment.
+cell-eval2 @ git+https://github.com/ArcInstitute/cell-eval2.git@a2630dcbda95fc0b819bf841e56d9561d9c1e1da

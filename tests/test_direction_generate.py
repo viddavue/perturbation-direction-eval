@@ -6,7 +6,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "experiments" / "perturbation_direction"))
 
-from generate import GuidedVelocity
+from generate import GuidedVelocity, cell_path, save_count_cells
 
 from scldm.nnets import DiT
 
@@ -61,3 +61,19 @@ def test_guided_velocity_matches_repo_cfg(strategy, vocab, w):
     # sanity: the condition actually matters
     other = {k: (v + 1) % vocab[k] for k, v in cond.items()}
     assert not torch.allclose(ours, GuidedVelocity(dit, guidance)(x, t, other))
+
+
+def test_cell_counts_are_saved_as_actual_cells(tmp_path):
+    import anndata as ad
+    import numpy as np
+
+    counts = np.array([[0, 2], [3, 1]], dtype=np.float32)
+    path = cell_path(tmp_path / "profiles.parquet", "a/b")
+    assert path.parent.name == "cells"
+    assert "/a/b" not in str(path)
+    save_count_cells(counts, ["g1", "g2"], {"id": "a/b", "gene": "p", "cell_line": "hepg2"}, path)
+    result = ad.read_h5ad(path)
+    np.testing.assert_array_equal(result.X.toarray(), counts)
+    assert result.obs.gene.tolist() == ["p", "p"]
+    with pytest.raises(ValueError, match="integer counts"):
+        save_count_cells(counts + 0.5, ["g1", "g2"], {"id": "p"}, path)
