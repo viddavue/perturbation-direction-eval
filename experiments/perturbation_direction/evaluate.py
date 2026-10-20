@@ -32,7 +32,8 @@ from metrics import evaluate, remove_shared, shuffled_prediction, summarize
 
 STRENGTH_BINS = [5, 20, 100, 500, np.inf]
 # reference categorical palette (fixed order, light mode) + text/grid tokens
-SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7"]
+SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7",
+          "#8c564b", "#17becf", "#bcbd22", "#7f7f7f", "#d62728"]
 TEXT, TEXT_2, GRID, SURFACE = "#0b0b0b", "#52514e", "#e4e3df", "#fcfcfb"
 
 

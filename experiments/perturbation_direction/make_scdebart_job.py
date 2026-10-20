@@ -74,6 +74,7 @@ def split_perturbations(
     lfc_index: set[str],
     seed: int,
     val_fraction: float = 0.1,
+    n_val: int | None = None,
 ) -> tuple[list[str], list[str], list[str], dict]:
     """Split our test perturbations into test / val / train, all disjoint.
 
@@ -87,7 +88,7 @@ def split_perturbations(
     remaining = sorted(lfc_index - set(test))
     rng = np.random.default_rng(seed)
     remaining = list(rng.permutation(remaining))
-    n_val = int(round(val_fraction * len(test)))
+    n_val = int(round(val_fraction * len(test))) if n_val is None else int(n_val)
     val = sorted(remaining[:n_val])
     train = sorted(remaining[n_val:])
     info = {
@@ -165,6 +166,7 @@ def main(argv=None) -> int:
     ap.add_argument("--symbol-map", default=None, help="optional pickled symbol->ensembl dict; else queried from Ensembl")
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--seed", type=int, default=30)
+    ap.add_argument("--n-val", type=int, default=None, help="explicit number of validation perturbations")
     ap.add_argument("--repo-root", default=".")
     ap.add_argument("--scdebart-repo", default="./scDEBART", help="where job.sh cd's before running deepspeed")
     ap.add_argument("--pretrained-dir", default="./cellxgene/pretrain_output", help="dir holding the pretrained weights")
@@ -188,6 +190,7 @@ def main(argv=None) -> int:
     if not all(isinstance(k, int) for k in list(ens2idx)[:5]):
         raise ValueError("ens2geneid.pkl is expected to map integer id -> Ensembl")
     id2ens = dict(ens2idx)
+    ens2id = {v: k for k, v in id2ens.items()}
 
     if args.symbol_map:
         sym2ens = pickle.loads(Path(args.symbol_map).read_bytes())
@@ -195,9 +198,13 @@ def main(argv=None) -> int:
         sym2ens = symbol_map_from_biomart(sorted(set(our_genes) | set(our_perts)))
 
     universe, unmapped = build_universe(our_genes, sym2ens, available)
-    train, val, test, split_info = split_perturbations(our_perts, sym2ens, lfc_index, args.seed)
-
     known_ids = set(id2ens.values())
+    # draw the split only over perturbations scDEBART can actually model, so --n-val is exact
+    usable = lfc_index & known_ids
+    train, val, test, split_info = split_perturbations(
+        our_perts, sym2ens, usable, args.seed, n_val=args.n_val
+    )
+
     dropped_genes = [g for g in universe if g not in known_ids]
     universe = [g for g in universe if g in known_ids]
     test = [p for p in test if p in known_ids]
@@ -232,7 +239,11 @@ def main(argv=None) -> int:
         )
     )
     (out / f"train_val_test_{args.seed}.pkl").write_bytes(pickle.dumps({"train": train, "val": val, "test": test}))
-    (out / f"hvg_geneids_{len(universe)}.pkl").write_bytes(pickle.dumps(universe))
+    split_info["genes_ensembl"] = universe
+    split_info["hvg_ids_kind"] = "integer ids (scDEBART's own convention; their script compares ints)"
+    (out / f"hvg_geneids_{len(universe)}.pkl").write_bytes(
+        pickle.dumps([ens2id[g] for g in universe])
+    )
     script = write_job_script(
         out,
         seed=args.seed,
