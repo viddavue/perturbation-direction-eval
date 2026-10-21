@@ -1,0 +1,27 @@
+{
+  "tag": "replogle_hepg2_hvg2000",
+  "eval_dir": "outputs/perturbation_direction/replogle/eval_freeze_20261021",
+  "git_commit": "f8852343fe3ff05a06799780257b5b9230d25508",
+  "metric": "balanced_acc",
+  "min_degs": 5,
+  "reference": "scLDM_w1",
+  "bootstrap": {
+    "n_boot": 2000,
+    "seed": 0,
+    "unit": "perturbations",
+    "interval": "percentile, 95%"
+  },
+  "test": "two-sided Wilcoxon signed-rank on paired perturbations; Holm within family",
+  "inputs": {
+    "outputs/perturbation_direction/replogle/eval_freeze_20261021/summary.csv": "737bc0992821d01b2e44c2bdfb736d2bfd7a2b1afe13a5be57739918f5f1ff1c",
+    "outputs/perturbation_direction/replogle/eval_freeze_20261021/summary_specific.csv": "60ffef6471a36bd3573c3f5081b5369470e713445fb0ca3acd366b1654cdb6b4"
+  },
+  "tables": [
+    "replogle_hepg2_hvg2000_summary.csv",
+    "replogle_hepg2_hvg2000_summary_paired.csv",
+    "replogle_hepg2_hvg2000_summary_raw.csv",
+    "replogle_hepg2_hvg2000_summary_specific.csv",
+    "replogle_hepg2_hvg2000_summary_specific_paired.csv",
+    "replogle_hepg2_hvg2000_summary_specific_raw.csv"
+  ]
+}
