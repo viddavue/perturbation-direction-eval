@@ -138,3 +138,28 @@ def test_official_cpu_preset_end_to_end(tmp_path):
     assert "expr_mse_unbiased_capped_norm" in set(summary.metric)
     assert "pds_cosine" in set(summary.metric)
     assert (out / "coverage.csv").exists()
+
+
+def test_repeated_draws_report_spread_not_just_one_value(tmp_path):
+    pytest.importorskip("cell_eval2")
+    from vcc_cells import main
+
+    rng = np.random.default_rng(11)
+    labels = ["non-targeting"] * 20 + ["p1"] * 20 + ["p2"] * 20
+    counts = rng.poisson(10, (60, 24))
+    counts[20:40, :8] *= 4
+    counts[40:, 8:16] *= 4
+    data = ad.AnnData(sparse.csr_matrix(counts),
+                     obs=pd.DataFrame({"gene": labels}, index=[str(i) for i in range(60)]),
+                     var=pd.DataFrame(index=[f"g{i}" for i in range(24)]))
+    real, pred = tmp_path / "real.h5ad", tmp_path / "pred.h5ad"
+    data.write_h5ad(real)
+    data.write_h5ad(pred)
+    out = tmp_path / "eval"
+    main(["--real", str(real), "--pred", str(pred), "--n-cells", "10", "--repeats", "2",
+          "--out-dir", str(out)])
+    across = pd.read_csv(out / "summary_across_repeats.csv", index_col=0)
+    assert set(across.columns) >= {"mean", "min", "max"}
+    assert (across["n_repeats"] == 2).all()
+    assert (out / "metrics_raw_rep1.csv").exists()
+    assert (out / "coverage_across_repeats.csv").exists()

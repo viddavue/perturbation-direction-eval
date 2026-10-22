@@ -78,6 +78,8 @@ def main(argv=None):
     parser.add_argument("--pert-key", default="gene")
     parser.add_argument("--control", default="non-targeting")
     parser.add_argument("--n-cells", type=int, default=32)
+    parser.add_argument("--repeats", type=int, default=1,
+                        help="independent cell subsamples; the panel scores vary with the draw")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--out-dir", type=Path, required=True)
     args = parser.parse_args(argv)
@@ -92,13 +94,40 @@ def main(argv=None):
     # outside it explicitly; never pretend their knockdown coordinate was excluded.
     cfg = replace(cfg, target_gene_map=target_map)
     cfg = replace(cfg, de=replace(cfg.de, backend="scanpy"))
-    result = compute_metrics(pred, real, config=cfg)
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    result.write_csv(args.out_dir / "metrics_raw.csv")
-    aggregate_metrics(result).write_csv(args.out_dir / "summary_raw.csv")
-    metric_coverage(result.to_dicts(), len(panel)).to_csv(args.out_dir / "coverage.csv", index=False)
+    # Repeated draws: a single subsample can make or break a DE call, so report spread as well
+    # as the point value. Each repeat resamples cells independently from both arms.
+    summaries, coverages = [], []
+    first_summary = None
+    for rep in range(args.repeats):
+        real_rep, pred_rep = (
+            (real, pred) if args.repeats == 1 else
+            sample_panel(ad.read_h5ad(args.real), ad.read_h5ad(args.pred), args.pert_key,
+                         args.control, args.n_cells, args.seed + rep)
+        )
+        result = compute_metrics(pred_rep, real_rep, config=cfg)
+        result.write_csv(args.out_dir / f"metrics_raw_rep{rep}.csv")
+        summary = aggregate_metrics(result)
+        summary.write_csv(args.out_dir / f"summary_raw_rep{rep}.csv")
+        if rep == 0:
+            first_summary = summary
+        summaries.append(summary.to_pandas().set_index("metric")["mean"].rename(rep))
+        coverages.append(metric_coverage(result.to_dicts(), len(panel)).set_index("metric")["n_finite"].rename(rep))
+    if args.repeats > 1:
+        combined = pd.concat(summaries, axis=1)
+        agg = pd.DataFrame({"mean": combined.mean(axis=1), "min": combined.min(axis=1),
+                            "max": combined.max(axis=1), "n_repeats": args.repeats})
+        agg.to_csv(args.out_dir / "summary_across_repeats.csv")
+        pd.concat(coverages, axis=1).assign(mean=lambda d: d.mean(axis=1)).to_csv(
+            args.out_dir / "coverage_across_repeats.csv")
+        print(agg.round(4).to_string())
+    else:
+        # keep the evaluator's own table (metric, mean, agg) for the single-draw case
+        first_summary.write_csv(args.out_dir / "summary_raw.csv")
+        coverages[0].to_frame("n_finite").to_csv(args.out_dir / "coverage.csv")
+        print(first_summary)
     manifest = {"expected_source_commit": PIN, "version": version("cell-eval2"),
-                "config": asdict(cfg), "n_cells": args.n_cells, "seed": args.seed,
+                "config": asdict(cfg), "n_cells": args.n_cells, "seed": args.seed, "repeats": args.repeats,
                 "panel": sorted(set(real.obs[args.pert_key].astype(str)) - {args.control}),
                 "genes": list(real.var_names),
                 "note": "RAW Replogle metrics with CPU scanpy DE backend, not official anchored VCC scores",
