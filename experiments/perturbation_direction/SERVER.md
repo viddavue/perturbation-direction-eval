@@ -9,7 +9,7 @@ Paths below are relative to the repo root. `E=experiments/perturbation_direction
 
 ```bash
 git clone <your-remote> scldm && cd scldm && git checkout perturbation-direction-eval
-# or: rsync -a --exclude .venv --exclude _artifacts --exclude outputs <pc>:PycharmProjects/scldm_claude/ scldm/
+# or: rsync -a --exclude .venv --exclude _artifacts --exclude outputs <pc>:PycharmProjects/perturbation-direction-eval/ scldm/
 
 # uv: curl -LsSf https://astral.sh/uv/install.sh | sh    (if not installed)
 uv venv --python 3.11 .venv && source .venv/bin/activate

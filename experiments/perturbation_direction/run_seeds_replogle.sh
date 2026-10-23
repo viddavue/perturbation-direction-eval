@@ -5,37 +5,30 @@
 # BATCH SIZE may not: generate.py seeds noise per batch index b, so 64 cells at batch 32 is two
 # blocks (b=0,1) while batch 16 is four. Changing it would silently change every cell's noise.
 #
-# Server safety: fewer GPUs than available (leaves headroom), capped thread pools, and a per-run
-# timeout so a wedged worker cannot sit on the node indefinitely.
+# A per-run timeout bounds a wedged worker so it cannot sit on a node indefinitely.
 #
-# Usage: GPUS=0,1,2,3 bash run_seeds_replogle.sh
+# Usage:
+#   GPUS=0,1,2 bash run_seeds_replogle.sh                      # university node
+#   JOB_ROOT=$PWD PYTHON=$PWD/.venv/bin/python GPUS=0 bash run_seeds_replogle.sh
 set -euo pipefail
 
-B=/system/user/studentwork/fleischa/scldm_generation_20261020
-PY=/system/apps/studentenv/fleischa/miniconda3/envs/scldm/bin/python
-GPUS=${GPUS:-0,1,2,3}
-SEEDS=${SEEDS:-0 1 2}
-COND=$B/outputs/perturbation_direction/replogle/test_conditions.csv
-cd "$B"
+source "$(dirname "${BASH_SOURCE[0]}")/replogle_runners.env"
 
-export OMP_NUM_THREADS=${OMP_NUM_THREADS:-4}
-export MKL_NUM_THREADS=${MKL_NUM_THREADS:-4}
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+SEEDS=${SEEDS:-0 1 2}
+COND=${COND:-$JOB_ROOT/outputs/perturbation_direction/replogle/test_conditions.csv}
+[ -f "$COND" ] || { echo "missing conditions file: $COND" >&2; exit 2; }
+cd "$JOB_ROOT"
 
 for S in $SEEDS; do
-  OUT="outputs/perturbation_direction/replogle/pred/test312_w2_ema_seed${S}.parquet"
+  OUT="$PRED_DIR/test312_w2_ema_seed${S}.parquet"
   if [ -f "$OUT" ]; then
     echo "== skip seed ${S} (exists)"
     continue
   fi
   echo "== seed ${S}: $(date +%H:%M:%S) on GPUs ${GPUS}"
-  timeout 14400 "$PY" -u experiments/perturbation_direction/generate.py \
-    --config _artifacts/resubmission/replogle_negative_binomial.yaml \
-    --ckpt _artifacts/resubmission/replogle_negative_binomial.ckpt \
-    --metadata-json metadata/replogle_train.json \
-    --conditions "$COND" \
-    --n-cells 64 --batch-size 32 --library-size 4850 \
-    --guidance 2 --ema --seed "$S" --gpus "$GPUS" \
-    --out "$OUT" || { echo "FAILED seed ${S}"; exit 1; }
+  ARGS=(--config "$CONFIG" --ckpt "$CKPT" --metadata-json "$METADATA" --conditions "$COND"
+        --n-cells 64 --batch-size 32 --library-size 4850
+        --guidance 2 --ema --seed "$S" --gpus "$GPUS" --out "$OUT")
+  timeout 14400 "$PYTHON" -u "$GENERATE" "${ARGS[@]}" || { echo "FAILED seed ${S}"; exit 1; }
 done
 echo "SEEDS_DONE $(date +%H:%M:%S)"
