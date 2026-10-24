@@ -47,17 +47,28 @@ def sample_panel(real, pred, key, control, n_cells, seed):
         raise ValueError("reference control missing")
     if real_groups - {control} != pred_groups - {control}:
         raise ValueError("perturbation panels differ")
+    # Equalise per perturbation, not across the panel: real perturbations have 30-433 cells, so a
+    # fixed count would either drop the small ones or force a low count everywhere. Both arms get
+    # the SAME n within a perturbation, which is what the DE comparison requires; n varies between
+    # perturbations, which the DE test tolerates. Realised counts are recorded in the manifest.
+    real_labels = real.obs[key].astype(str).to_numpy()
+    pred_labels = pred.obs[key].astype(str).to_numpy()
+    shared = {}
+    for label in sorted(set(real_labels)):
+        n = min(n_cells, int((real_labels == label).sum()), int((pred_labels == label).sum()))
+        if n < 2:
+            raise ValueError(f"{label}: too few cells in one arm for a DE test")
+        shared[label] = n
+
     rng = np.random.default_rng(seed)
-    def sample(adata):
-        labels = adata.obs[key].astype(str).to_numpy()
-        indices = []
-        for label in sorted(set(labels)):
+    def draw(adata, labels):
+        keep = []
+        for label, n in shared.items():
             rows = np.flatnonzero(labels == label)
-            if len(rows) < n_cells:
-                raise ValueError(f"{label} has {len(rows)} cells, fewer than requested {n_cells}")
-            indices.extend(rng.choice(rows, n_cells, replace=False))
-        return adata[indices, real.var_names].copy()
-    return sample(real), sample(pred)
+            keep.extend(rng.choice(rows, n, replace=False))
+        return adata[keep, real.var_names].copy()
+
+    return draw(real, real_labels), draw(pred, pred_labels)
 
 
 def metric_coverage(records, n_panel):

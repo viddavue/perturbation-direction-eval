@@ -14,10 +14,10 @@ set -euo pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/replogle_runners.env"
 
-SEEDS=${SEEDS:-0 1 2}
-COND=${COND:-$JOB_ROOT/outputs/perturbation_direction/replogle/test_conditions.csv}
-[ -f "$COND" ] || { echo "missing conditions file: $COND" >&2; exit 2; }
+SEEDS=$(normalize_seeds "${SEEDS:-0,1,2}")
+COND=${COND:-outputs/perturbation_direction/replogle/test_conditions.csv}
 cd "$JOB_ROOT"
+[ -f "$COND" ] || { echo "missing conditions file: $JOB_ROOT/$COND" >&2; exit 2; }
 
 for S in $SEEDS; do
   OUT="$PRED_DIR/test312_w2_ema_seed${S}.parquet"
@@ -28,7 +28,7 @@ for S in $SEEDS; do
   echo "== seed ${S}: $(date +%H:%M:%S) on GPUs ${GPUS}"
   ARGS=(--config "$CONFIG" --ckpt "$CKPT" --metadata-json "$METADATA" --conditions "$COND"
         --n-cells 64 --batch-size 32 --library-size 4850
-        --guidance 2 --ema --seed "$S" --gpus "$GPUS" --out "$OUT")
-  timeout 14400 "$PYTHON" -u "$GENERATE" "${ARGS[@]}" || { echo "FAILED seed ${S}"; exit 1; }
+        --guidance 2 --ema --seed "$S")
+  run_generation "$OUT" "${ARGS[@]}" || { echo "FAILED seed ${S}"; exit 1; }
 done
 echo "SEEDS_DONE $(date +%H:%M:%S)"

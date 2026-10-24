@@ -17,10 +17,10 @@ set -uo pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/replogle_runners.env"
 
-SEEDS=${SEEDS:-0 1 2}
-COND=${COND:-$JOB_ROOT/outputs/perturbation_direction/replogle/test_conditions.csv}
-[ -f "$COND" ] || { echo "missing conditions file: $COND" >&2; exit 2; }
+SEEDS=$(normalize_seeds "${SEEDS:-0,1,2}")
+COND=${COND:-outputs/perturbation_direction/replogle/test_conditions.csv}
 cd "$JOB_ROOT"
+[ -f "$COND" ] || { echo "missing conditions file: $JOB_ROOT/$COND" >&2; exit 2; }
 
 gen() {  # gen <out> <n_cells> <seed> <extra flags...>
   local out="$1" cells="$2" seed="$3"; shift 3
@@ -28,8 +28,8 @@ gen() {  # gen <out> <n_cells> <seed> <extra flags...>
   echo "== $(basename "$out"): start $(date +%H:%M:%S) on GPUs ${GPUS}"
   local args=(--config "$CONFIG" --ckpt "$CKPT" --metadata-json "$METADATA" --conditions "$COND"
               --n-cells "$cells" --batch-size 32 --library-size 4850
-              --guidance 2 --ema --seed "$seed" --gpus "$GPUS" --out "$out" "$@")
-  timeout 21600 "$PYTHON" -u "$GENERATE" "${args[@]}"
+              --guidance 2 --ema --seed "$seed" "$@")
+  run_generation "$out" "${args[@]}"
   local rc=$?
   echo "== $(basename "$out"): end $(date +%H:%M:%S) rc=${rc}"
   return $rc

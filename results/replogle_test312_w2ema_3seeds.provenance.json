@@ -1,0 +1,27 @@
+{
+  "tag": "replogle_test312_w2ema_3seeds",
+  "eval_dir": "outputs/perturbation_direction/replogle/eval_test312",
+  "git_commit": "7a5f4c6157850650372bcd6d9cf4af04f534336e",
+  "metric": "balanced_acc",
+  "min_degs": 5,
+  "reference": "scLDM_s0",
+  "bootstrap": {
+    "n_boot": 2000,
+    "seed": 0,
+    "unit": "perturbations",
+    "interval": "percentile, 95%"
+  },
+  "test": "two-sided Wilcoxon signed-rank on paired perturbations; Holm within family",
+  "inputs": {
+    "outputs/perturbation_direction/replogle/eval_test312/summary.csv": "7d29df1ddb1d51a0c6e60273a8c21f2c01b2502e0a9941f6be84d4640c7f4fe5",
+    "outputs/perturbation_direction/replogle/eval_test312/summary_specific.csv": "34aaa10d2e4c44bba033b6a8ddc526ebfa81e2b27459680b7fab8e3f52d07444"
+  },
+  "tables": [
+    "replogle_test312_w2ema_3seeds_summary.csv",
+    "replogle_test312_w2ema_3seeds_summary_paired.csv",
+    "replogle_test312_w2ema_3seeds_summary_raw.csv",
+    "replogle_test312_w2ema_3seeds_summary_specific.csv",
+    "replogle_test312_w2ema_3seeds_summary_specific_paired.csv",
+    "replogle_test312_w2ema_3seeds_summary_specific_raw.csv"
+  ]
+}
