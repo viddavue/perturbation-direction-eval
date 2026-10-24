@@ -208,6 +208,31 @@ the model gets signs right on genes the reference calls, but recovers only about
 overlap of responding genes. That is a discovery failure, not a direction failure, and it is the
 clearest remaining gap.
 
-Anchoring these against a real-vs-real split of the same panel is the next step; without it these
-are absolute numbers with no reference point. `make_real_halves.py` produces the disjoint halves
-(13,075 / 13,231 cells, controls split too) and `vcc_cells.py` scores them the same way.
+### Anchored against a real-vs-real split of the same panel
+
+`make_real_halves.py` splits every group (controls included) into disjoint halves — 13,075 /
+13,231 cells — and `vcc_cells.py` scores one half against the other with the same 64-cell
+equalisation. That is the best a 64-cell sample of the same experiment can do, so it is the
+reference point, not a competitor.
+
+| raw metric | scLDM | real-half | fraction of replicate |
+|---|---:|---:|---:|
+| PDS cosine | 0.793 | 0.811 | 0.98 |
+| DE direction fidelity | 0.686 | 0.728 | 0.94 |
+| DE direction reach | 0.841 | 0.987 | 0.85 |
+| DE significance Jaccard | 0.303 | 0.526 | **0.58** |
+| DE logFC NMAE (lower better) | 0.681 | 0.499 | 0.73 |
+| expression MSE ratio (lower better) | 0.864 | -0.078 | far worse |
+
+Reading:
+
+- **Direction is essentially at replicate quality.** PDS 0.98 and fidelity 0.94 of what a
+  disjoint half of the real experiment achieves. Whatever else fails, the model orders and
+  signs genes close to the noise floor of the measurement.
+- **Discovery is the failure.** Jaccard reaches 58% of the replicate: the model finds a third of
+  the significant-gene overlap, and the replicate shows 0.526 is attainable at this cell count.
+- **Magnitudes and absolute expression lag.** NMAE 0.681 against 0.499, and expression MSE at
+  0.86 of the real effect size against roughly zero for a replicate.
+- The real-half numbers are **not** a ceiling in the formal sense: two disjoint 64-cell samples
+  are a pessimistic stand-in for full-depth measurement, so "0.58 of replicate" is a lower bound
+  on the model's shortfall relative to a perfect prediction.
