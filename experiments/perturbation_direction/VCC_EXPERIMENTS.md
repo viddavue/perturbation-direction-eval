@@ -182,3 +182,32 @@ full-panel run. Do not repeat mean rows as cells or invent DE p-values for profi
 3. Select guidance/EMA on validation perturbations only; test the selected settings once.
 4. Correct the scDEBART input-token coverage and restrict supervised training to the actual
    scLDM training contexts, not just the complement of mapped test labels, before retraining.
+
+## 5. Cell-level DE on the full test panel (test-312)
+
+Generated with `--save-cells` at 128 cells per condition from the validation-selected config
+(w2 + EMA), then scored against real cells with cells equalised **per perturbation** (both arms
+take the same n; n varies 30-64 because real perturbations hold 30-433 cells). Three independent
+subsamples.
+
+| raw metric | mean | min-max (3 draws) | perturbations scored |
+|---|---:|---|---:|
+| PDS cosine | 0.793 | 0.786-0.800 | 312/312 |
+| expression MSE ratio (lower better) | 0.864 | 0.771-1.015 | panel-wide |
+| DE logFC NMAE (lower better) | 0.681 | 0.649-0.711 | **134/312** |
+| DE direction fidelity (yield) | 0.686 | 0.668-0.715 | 251/312 |
+| DE direction reach | 0.841 | 0.788-0.876 | 195/312 |
+| DE significance Jaccard | 0.303 | 0.284-0.314 | 312/312 |
+
+Coverage is much better than the 32-cell pilot (NMAE 1/9 -> 134/312, fidelity 3/9 -> 251/312),
+but NMAE still scores fewer than half the panel: at these cell counts the reference DE test does
+not flag enough genes per perturbation to gate the metric. Treat NMAE as a partial-cohort number.
+
+**Jaccard (0.303) is the weak point.** Direction agrees far better than the significant-gene set:
+the model gets signs right on genes the reference calls, but recovers only about a third of the
+overlap of responding genes. That is a discovery failure, not a direction failure, and it is the
+clearest remaining gap.
+
+Anchoring these against a real-vs-real split of the same panel is the next step; without it these
+are absolute numbers with no reference point. `make_real_halves.py` produces the disjoint halves
+(13,075 / 13,231 cells, controls split too) and `vcc_cells.py` scores them the same way.
