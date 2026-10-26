@@ -1,0 +1,6 @@
+method,n,balanced_acc_median,auroc_median,note
+scLDM_w2_ema,167,0.931,0.990,"validation-selected config, seed 0"
+scDEBART_corrected,167,0.768,0.885,321/321 target tokens present
+scDEBART_old_vocab,167,0.782,0.889,51/321 target tokens present (bug)
+paired: scLDM - corrected,164,"+0.130 [+0.116, +0.159]",,p=1.3e-18
+paired: corrected - old,164,"+0.002 [0.000, +0.018]",,p=0.13

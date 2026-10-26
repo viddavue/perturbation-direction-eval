@@ -199,3 +199,38 @@ with under-training. The supportable claim is "our reproduction does not beat sc
   *splits*; our split is fixed, so a single run is enough unless we want training variance.
 - **Scoring must drop the 51 test perturbations whose target gene is in the measured gene set**,
   or leave the target-gene exclusion on (`--exclude-target`), to match how scLDM is scored.
+
+## Corrected run: the token bug did not explain the gap
+
+The restricted vocabulary (1,784 scoring genes) excluded 270 of the 321 test targets, so those
+profiles carried an all-zero perturbation indicator. All 321 targets are present in the DE file's
+9,297 gene columns, so the fix is a vocabulary of scoring genes plus every perturbation target
+that the DE file contains: **3,474 genes**, covering 321/321 test, 54/60 validation and
+1,662/1,863 training targets.
+
+Configuration: micro-batch 1 x accumulation 7 x 3 GPUs = 21 effective (their 20), fp16, 40 epochs
+with patience 5 -> stopped at epoch 21, ~10 min/epoch.
+
+Audit of the new archive: **321/321 target tokens present** (old run: 51/321).
+
+| method | n | balanced accuracy | AUROC |
+|---|---:|---:|---:|
+| scLDM (w2 + EMA, seed 0) | 167 | **0.931** | 0.990 |
+| scDEBART, corrected vocabulary | 167 | 0.768 | 0.885 |
+| scDEBART, old vocabulary (bug) | 167 | 0.782 | 0.889 |
+
+Paired on the common 164 perturbations: scLDM - corrected **+0.130 [+0.116, +0.159], p = 1.3e-18**;
+corrected - old **+0.002 [0.000, +0.018], p = 0.13**.
+
+Two conclusions:
+
+1. **The conditioning bug was real but not causal.** Fixing it changed the score by +0.002, which is
+   not distinguishable from zero. The earlier "compromised comparison" caveat can be retired: the
+   deficit is a property of the model as reproduced, not of the missing indicators.
+2. **The gap is uniform across strengths.** scLDM scores 0.858 / 0.894 / 0.924 / 0.972 over the
+   5-19 / 20-99 / 100-499 / 500+ DEG bins; corrected scDEBART scores 0.661 / 0.778 / 0.806 / 0.765.
+   It does not catch up on strong perturbations, and it gets slightly worse there.
+
+Remaining caveats, unchanged and not in scDEBART's favour: a single training seed, 21 epochs, our
+gene universe, and a sign-level target while the model predicts log2 fold change directly. A
+definitive claim about scDEBART would need their 50-resample targets and full schedule.
