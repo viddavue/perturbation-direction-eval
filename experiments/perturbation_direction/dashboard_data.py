@@ -36,7 +36,14 @@ class Run:
 
 def find_runs(root: str | pathlib.Path) -> list[pathlib.Path]:
     """Evaluation directories (containing summary.csv) under root, newest first."""
-    runs = [p.parent for p in pathlib.Path(root).rglob("summary.csv")]
+    # A run is an evaluate.py output: summary.csv AND at least one per-knockdown table. A folder
+    # that merely contains a summary.csv (vcc_profiles.py output, a hand-copied summary) has no
+    # per_perturbation tables, so every view would fail to find a method to plot.
+    runs = [
+        p.parent
+        for p in pathlib.Path(root).rglob("summary.csv")
+        if any((p.parent / "per_perturbation").glob("*.csv"))
+    ]
     return sorted(runs, key=lambda p: (p / "summary.csv").stat().st_mtime, reverse=True)
 
 

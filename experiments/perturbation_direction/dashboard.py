@@ -173,12 +173,16 @@ with st.sidebar:
     view = st.radio("View", VIEWS, key="view")
     reports = [r for r in ("full", "specific") if r in run.summary]
     report = st.radio("Report", reports, format_func=REPORT_LABELS.get, key="report")
-    candidates = [m for m in run.per_pert[report] if m != dd.CEILING]
+    per_report = run.per_pert[report]
+    candidates = [m for m in per_report if m != dd.CEILING]
+    if not candidates:
+        st.error(f"No per-knockdown tables in `{run_path}`.")
+        st.stop()
     default = [m for m in candidates if not m.endswith("(shuffled)") and not m.startswith("transfer_")][:8]
     selected = st.multiselect("Methods", candidates, default=default, key=f"methods_{report}")
     show_ceiling = st.checkbox("Show noise ceiling", value=True)
     metric = st.selectbox(
-        "Metric", [m for m in METRICS if m in next(iter(run.per_pert[report].values()))], format_func=METRICS.get
+        "Metric", [m for m in METRICS if m in next(iter(per_report.values()))], format_func=METRICS.get
     )
     min_degs = st.number_input(
         "Min. true DEGs per perturbation", 0, 1000, int((run.manifest or {}).get("min_degs", 5)), step=1
@@ -213,6 +217,13 @@ st.caption(
     f"{len(keep)} of {len(n_true)}"
 )
 
+# With no method selected (and the ceiling unticked) these two views have nothing to plot:
+# Overview indexes an empty frame's "median" column and strength_table builds a zero-row table.
+# Head-to-head already guards this case; do the same here, before any view-specific work.
+if view in ("Overview", "Strength & distributions") and not any(m in per_pert for m in shown):
+    st.info("Select at least one method in the sidebar.")
+    st.stop()
+
 # ================================================================ Perturbation
 if view == "Perturbation":
     if not has_manifest:
@@ -233,6 +244,13 @@ if view == "Perturbation":
     genes, mets = dd.perturbation_detail(
         pert, t_delta, t_deg, truth.padj, effects, exclude_target, float(run.manifest.get("eps", 0.0))
     )
+    # Some methods cover only part of the panel (scDEBART lacks 51 knockdowns; the per-line
+    # transfers lack 54-87). perturbation_detail skips them, so drop their columns and say why
+    # instead of asking the tables for methods that are not there.
+    missing = [m for m in show if m not in genes]
+    if missing:
+        st.caption(f"No prediction for {pert}: {', '.join(missing)}")
+        show = [m for m in show if m in genes]
 
     deg_row = genes[genes["deg"]]
     c = st.columns(4)
