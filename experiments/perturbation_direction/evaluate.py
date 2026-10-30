@@ -270,6 +270,20 @@ def main(argv=None):
         # perturbation-specific component: project the shared response out of truth and every prediction,
         # per perturbation (d - beta_p * shared), so neither its direction nor its strength is scored here
         ref_vec = pd.read_parquet(args.specific_ref).mean()
+        # The reference may cover fewer genes than the predictions (a panel built on a restricted
+        # gene set). Restrict every side to the reference's genes first: leaving NaN columns would
+        # make remove_shared's NaN-aware arithmetic zero the residuals, and every method would then
+        # look like a pure shared response and be silently dropped from this report.
+        shared_genes = [g for g in ref_vec.index if g in delta_true.columns]
+        missing = {n: len(set(shared_genes) - set(d.columns)) for n, d in methods.items()}
+        dropped = {n: k for n, k in missing.items() if k}
+        if dropped:
+            print(f"specific report: restricting to {len(shared_genes)} genes present in the reference; "
+                  f"methods missing some genes: {dropped}")
+        ref_vec = ref_vec.reindex(shared_genes)
+        delta_true = delta_true[shared_genes]
+        deg = deg[shared_genes]
+        methods = {n: d.reindex(columns=shared_genes) for n, d in methods.items()}
         min_lfc = info.get("min_lfc", 0.1)
         true_s, beta_true = remove_shared(delta_true, ref_vec)
         deg_s = deg & (true_s.abs() > min_lfc)
