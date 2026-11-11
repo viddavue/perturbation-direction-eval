@@ -1,0 +1,69 @@
+# Raw Replogle-Nadig rebuild: inputs, outputs and parameters of the data stage
+# (audit_raw_screen.py -> prepare_replogle_raw.py -> verify_merge.py; runner: run_replogle_raw_data.sh).
+#
+# Relative paths are relative to the working directory: run from the repository root (the runner cds there).
+# Any key can be overridden on the command line in OmegaConf dotlist form, e.g.
+#   python experiments/perturbation_direction/prepare_replogle_raw.py \
+#     --config experiments/configs/perturbation_direction/replogle_raw.yaml \
+#     raw_dir=_artifacts/datasets/replogle_raw out_dir=/tmp/raw_prepared block=5000
+
+raw_dir: /system/user/studentwork/fleischa/replogle_raw          # downloads + .md5 files (read-only)
+out_dir: /system/user/studentwork/fleischa/replogle_raw_prepared # prepared h5ads, manifest, verify reports
+train_json: metadata/replogle_train.json   # 2,000 model genes (order) + label vocabulary (2,024 genes incl. control)
+test_json: metadata/replogle_test.json     # the 372 HepG2 test targets
+state_reference: outputs/perturbation_direction/replogle_raw/state_reference/state_reference.parquet  # make_state_reference.py
+
+pert_key: gene              # obs column with the CRISPR target
+control: non-targeting      # control label in every screen
+gene_col: gene_name         # var column with gene symbols (the var index is the Ensembl id)
+context_key: cell_line
+target_context: hepg2       # the held-out line: test = hepg2 cells whose target is in test_json
+block: 20000                # rows per read block (dense rows of ~9k float32 genes: ~0.7 GB per block)
+require_md5: true           # refuse a raw file without a non-empty <file>.md5 equal to the md5 below
+# Every run also recomputes each raw file's md5 (verify_merge.py checksums -> <out_dir>/checksums.json)
+# and requires it to equal both the md5 below and the .md5 sidecar. Per screen, md5_source says where
+# the expected md5 comes from; it is provenance only and never makes a runner step rerun.
+
+versions: [filtered, all]   # filtered = STATE's knockdown filter reproduced from raw (PRIMARY); all = no filter
+primary_version: filtered
+
+knockdown:                  # cell-load filter_on_target_knockdown, as used for the STATE paper
+  residual_expression: 0.30       # perturbation level: mean(own target) / control mean < 0.30
+  cell_residual_expression: 0.50  # cell level: own target / control mean < 0.50
+  min_cells: 30                   # perturbations with fewer kept cells are dropped; controls always kept
+
+split:
+  min_test_cells: 30        # every test target needs >= this many cells in the primary version
+
+audit:
+  min_controls: 300
+
+screens:
+  - name: hepg2
+    cell_line: hepg2
+    file: GSE264667_hepg2_raw_singlecell_01.h5ad
+    url: https://ftp.ncbi.nlm.nih.gov/geo/series/GSE264nnn/GSE264667/suppl/GSE264667_hepg2_raw_singlecell_01.h5ad
+    size: 5614460941
+    md5: dfc676e4186b8c8c173ff14e1194cc8a
+    md5_source: no published md5; computed on download, equal to an independent earlier download (dfc676e4186b8c8c173ff14e1194cc8a)
+  - name: jurkat
+    cell_line: jurkat
+    file: GSE264667_jurkat_raw_singlecell_01.h5ad
+    url: https://ftp.ncbi.nlm.nih.gov/geo/series/GSE264nnn/GSE264667/suppl/GSE264667_jurkat_raw_singlecell_01.h5ad
+    size: 9366490264
+    md5: dae9fab2a8b0430099a76ce60d0c5405
+    md5_source: no published md5; computed on download
+  - name: k562_essential
+    cell_line: k562
+    file: K562_essential_raw_singlecell_01.h5ad
+    url: https://ndownloader.figshare.com/files/35773219
+    size: 10661879995
+    md5: 4f1122ce1c7f13299a68df6459a266d3
+    md5_source: figshare-published md5 of file 35773219, matched on download
+  - name: rpe1
+    cell_line: rpe1
+    file: rpe1_raw_singlecell_01.h5ad
+    url: https://ndownloader.figshare.com/files/35775606
+    size: 8700873216
+    md5: 6a2a9d0d2bf4ec147f4d1104043b268c
+    md5_source: figshare-published md5 of file 35775606, matched on download
