@@ -66,7 +66,7 @@ By reference strength (balanced accuracy): 0.942 at 5-19 DEGs (10 perturbations)
   protocols differ in the data, not just the biology.
 - **No baselines yet.** Cross-context transfer needs more than one cell type; a generic
   shared-response baseline for cytokines is the natural next comparator, alongside the
-  kNN/calibrated baselines used for Replogle.
+  kNN/MLP baselines used for Replogle.
 
 ## Reproduce
 

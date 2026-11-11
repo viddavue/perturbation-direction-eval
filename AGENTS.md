@@ -37,7 +37,7 @@
 
 ## Verification
 
-- Run `python -m pytest -q tests` after changing library or pipeline code (expect ~30 passed, 1 skipped).
+- Run `python -m pytest -q tests` after changing library or pipeline code (expect ~255 passed, 5 skipped).
 - `ruff check` / `ruff format` via pre-commit; line length is 120 and the docstring convention is numpy.
 
 ## Conventions

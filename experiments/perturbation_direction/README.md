@@ -3,25 +3,71 @@
 How well does scLDM predict whether a perturbation pushes a gene **up or down**?
 
 ```
-prepare_replogle_state.py  STATE Replogle-Nadig file -> scLDM-style train/test count h5ads
+audit_raw_screen.py     per raw Replogle screen: integer counts, controls, model genes, vocabulary (read-only)
+knockdown_filter.py     STATE's (cell-load) on-target knockdown filter, reproduced from raw counts
+prepare_replogle_raw.py raw screens -> train/test count h5ads in two versions: filtered (primary) and all
+make_state_reference.py STATE's cells, labels, counts hashes and split, for the identity gates
+verify_merge.py  gates A1-A4 (raw filtered == STATE), A5 (truth == frozen truth), Tier B (filtered vs all)
+prepare_replogle_state.py  legacy: STATE Replogle-Nadig file -> scLDM-style train/test count h5ads
 audit.py         fail-fast checks: counts layer, gene/label vocab, split structure, size factors, EMA
 ground_truth.py  real Δ (perturbed − control, mean log1p CP10k), Wilcoxon DEGs, split-half noise ceiling
 generate.py      scLDM profiles per condition with paired noise (same z for every condition)
-baselines.py     transfer (mean / per line), generic shift, calibrated (ridge) and kNN transfer
-transfer_models.py  calibrated + kNN cross-context predictors (fit on target-context TRAIN perturbations only)
-learned_baselines.py  trained direction classifiers ported from perturbational_effect_pw (prior/bilinear/MLP/GBDT)
+baselines.py     transfer (mean over the other lines), generic shift and kNN transfer
+transfer_models.py  kNN cross-context predictor (fit on target-context TRAIN perturbations only)
+learned_baselines.py  trained direction classifiers ported from perturbational_effect_pw (prior and MLP)
 direction_models.py   their models + SVD gene/perturbation embeddings
 evaluate.py      per-perturbation metrics, summary table, specificity (shuffled) control, plots
 metrics.py       pure metric functions (tested in tests/test_direction_metrics.py)
+subset_truth.py  restrict a truth dir to the val or test side of a split
+select_sweep.py  guidance/EMA choice from the validation perturbations only
+stats.py         bootstrap CIs over perturbations, paired Wilcoxon tests, Holm
+freeze_results.py  one evaluate.py dir -> the commit-able results/ tables (CIs, paired tests, provenance)
+side_by_side.py  the raw rebuild's main table: filtered | all, shared panel, paired tests, provenance
+run_replogle_raw_data.sh  data stage: checksums -> audit -> prepare (filtered + all) -> gates A1-A4
+run_replogle_raw_eval.sh  evaluation stage: truth per version -> A5 + validation check -> baselines ->
+                          evaluate.py per version -> side_by_side.py
 ```
+
+**Replogle now runs from the raw screens**, in two stages on the server ([SERVER.md](SERVER.md) sections 4-5):
+`run_replogle_raw_data.sh` (config `experiments/configs/perturbation_direction/replogle_raw.yaml`) and
+`run_replogle_raw_eval.sh` (config `replogle_raw_eval.yaml`). The generations are reused, not regenerated.
+
+## Replogle main table: filtered | all, side by side
+
+The rebuild has two versions of the same screens: `filtered` keeps the cells STATE's knockdown filter keeps
+(reproduced from raw; identical cells, counts and split to the STATE files, gates A1-A4), `all` keeps every
+cell. Both are evaluated end to end: each has its own ground truth (CP10k over the 2,000 model genes, log1p),
+its own baselines refitted on its own train file, and its own `evaluate.py` run on the 312 test perturbations,
+with the same three scLDM seeds (w2 + EMA). `filtered` is primary.
+
+- **Gates before anything is fitted:** A5, the `filtered` truth equals the frozen STATE-based truth; and the
+  validation check, the guidance sweep rescored on the `filtered` 60 validation perturbations still picks the
+  frozen config (`w2_ema`). The guidance config is chosen once and never re-chosen per version.
+- **Rows:** scLDM seeds 0-2 (seed 0 is the reference), kNN, MLP, generic, transfer, prior, the shuffled
+  controls and the split-half ceiling. **Columns:** `filtered (primary)` | `all`, for the full effect and the
+  perturbation-specific report.
+- **Shared panel:** medians, bootstrap CIs and the paired tests use the perturbations with >= 5 DEGs (target
+  excluded) in **both** versions, so a difference between the columns is not a difference in panels. Each
+  column's own-panel n and median are listed too.
+- **Statistics** (`stats.py`, as in the frozen tables): median balanced accuracy, 95% percentile bootstrap CI
+  over perturbations (2,000 resamples), two-sided Wilcoxon signed-rank vs scLDM seed 0 with the CI of the
+  paired median difference, Holm within each (report, version) column, raw p alongside.
+- **Outputs:** `results/replogle_raw_test312_w2ema_3seeds_side_by_side.{md,csv}` (+ `_specific`, `_long`,
+  `_panel`, `_vs_frozen`) and `<tag>.provenance.json` (commit + dirty flag, sha256 of every input including
+  the prediction files and the prepared files' `manifest.json`, the resolved config, the run's start time).
+- `_vs_frozen.csv` compares the `filtered` own panel with the frozen STATE-based table: equal for every method
+  whose inputs did not change (the MLP is now seeded, so it can differ).
+- `verify/filtered_vs_all/` (Tier B) says how the two truths differ per perturbation: effect correlation and
+  slope, DEG overlap, panel sizes.
 
 ## Dashboard
 
 ### VCC-2026-oriented experiments
 
-See [VCC_EXPERIMENTS.md](VCC_EXPERIMENTS.md) for the pinned official metric implementation,
-fixed-panel effect retrieval, the denoising/filtering ablation, and a cell-level DE pilot.
-These are local Replogle diagnostics, not official Challenge leaderboard scores.
+See the cell-level VCC diagnostics appendix in [METHODS.md](METHODS.md) for the pinned official
+metric implementation, fixed-panel effect retrieval, the denoising/filtering ablation, and the
+cell-level DE results. These are local Replogle diagnostics, not official Challenge leaderboard
+scores.
 
 An interactive explorer for any evaluation run (`evaluate.py` output directory):
 
@@ -65,22 +111,19 @@ streamlit run experiments/perturbation_direction/dashboard.py -- --root outputs/
   - noise ceiling: DEGs and directions from one random half of the cells, scored on the other half. It
     is slightly pessimistic, since each half has only half the cells.
   - shuffled: each perturbation is scored with another perturbation's prediction, to test specificity.
-  - transfer: the same perturbation's measured effect in other cell lines, averaged over them
-    (`transfer`) or taken from one line (`transfer_<line>`).
+  - transfer: the same perturbation's measured effect in the other cell lines, averaged over them.
   - generic: the average effect of the HepG2 training perturbations, i.e. the shared response.
-  - calibrated: for each gene, a ridge regression from the other lines' effects to the HepG2 effect.
   - knn: the HepG2 effects of the training perturbations that behave most similarly in the other lines.
-  - The calibrated and kNN baselines are fitted only on the 968 HepG2 training perturbations, with
-    hyperparameters chosen by 5-fold cross-validation. Test perturbations are never used for fitting.
-- **Trained classifiers** (`learned_baselines.py`): the prior, bilinear, MLP and GBDT models from
-  perturbational_effect_pw, which predict P(up) for (perturbation, gene, cell line).
+  - The kNN baseline is fitted only on the 968 HepG2 training perturbations, with k chosen by 5-fold
+    cross-validation. Test perturbations are never used for fitting.
+- **Trained classifiers** (`learned_baselines.py`): the prior and MLP models from perturbational_effect_pw,
+  which predict P(up) for (perturbation, gene, cell line). Both are always trained.
   - Training labels are the significant genes (Welch t-test, BH < 0.05, |Δ| > 0.1) of every training
     perturbation in every cell line, including HepG2's 968 training perturbations. Test perturbations never
     appear.
   - Gene embeddings come from SVD of training effects. A target gene is described by its responses across
     all training perturbations; a perturbation by its effect profiles in the other cell lines only, so train
     and test perturbations are represented the same way.
-  - The GBDT gets a one-hot cell line. The original had no cell-line feature, so it averaged over lines.
   - Output is P(up) − 0.5, so `evaluate.py` scores its sign like any other baseline.
 - **Perturbation-specific report** (`--specific-ref`). Many CRISPRi knockdowns share a stress or
   proliferation signature g, so plain sign accuracy can be high for a model that only learned it.
@@ -94,11 +137,11 @@ streamlit run experiments/perturbation_direction/dashboard.py -- --root outputs/
   - **Strength reported separately:** `shared_strength_corr` is the correlation between predicted and
     observed β across perturbations.
 
-## Replogle (GPU machine, batch size 32)
+## Replogle, legacy STATE route (GPU machine, batch size 32)
 
-**For a step-by-step setup on a (multi-)GPU server, see [SERVER.md](SERVER.md).** That includes
-multi-GPU generation (`--gpus 0,1,2,3`, resumable), SLURM arrays, and time estimates. The commands below
-are the single-machine version.
+**The current route is the raw rebuild above ([SERVER.md](SERVER.md) sections 4-5).** This section is how the
+original STATE-based runs were made; [SERVER.md](SERVER.md) also covers multi-GPU generation (`--gpus 0,1,2,3`,
+resumable), SLURM arrays, and time estimates. The commands below are the single-machine version.
 
 STATE-style split: test = HepG2 × 372 CRISPRi targets, all of which are seen in other cell lines in
 training. The test file has **no HepG2 non-targeting cells**, so controls come from the train file.
@@ -142,7 +185,8 @@ done; done
 python $E/evaluate.py --truth-dir $O/truth --exclude-target \
   --pred scLDM_w1=$O/pred/w1.parquet scLDM_w2=$O/pred/w2.parquet scLDM_w1_ema=$O/pred/w1_ema.parquet \
   --baseline transfer=$O/baselines/delta_transfer.parquet generic=$O/baselines/delta_generic.parquet \
-  --out-dir $O/eval
+             knn=$O/baselines/delta_knn.parquet \
+  --specific-ref $O/baselines/delta_generic.parquet --out-dir $O/eval
 ```
 
 ## Dentate gyrus smoke test (laptop CPU, batch size 16)
