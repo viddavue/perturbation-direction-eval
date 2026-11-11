@@ -1,0 +1,87 @@
+# Raw Replogle-Nadig rebuild, evaluation stage: the prepared `filtered` / `all` files -> the side-by-side main table.
+# Runner: experiments/perturbation_direction/run_replogle_raw_eval.sh (steps and outputs are listed there).
+# Data stage (must have finished first): replogle_raw.yaml + run_replogle_raw_data.sh.
+#
+# Relative paths are relative to the repository root (the runner cds there). Any key can be overridden on the
+# command line in OmegaConf dotlist form, e.g.
+#   bash experiments/perturbation_direction/run_replogle_raw_eval.sh \
+#     prepared_dir=/tmp/prepared generation_dir=outputs/perturbation_direction/replogle controls=null
+# (`controls=null` skips the optional generation controls; `{}` would merge into the mapping and change nothing.)
+
+prepared_dir: /system/user/studentwork/fleischa/replogle_raw_prepared  # run_replogle_raw_data.sh out_dir (read-only)
+require_data_done: true       # refuse to start unless <prepared_dir>/DONE_raw_data exists (data stage + gates A1-A4)
+out_dir: ${prepared_dir}/eval  # truth, baselines, evaluate.py dirs, verify reports, logs, DONE_raw_eval
+results_dir: results          # side_by_side.py tables + provenance (commit-able, like freeze_results.py's)
+results_tag: replogle_raw_test312_w2ema_3seeds
+
+versions: [filtered, all]     # each evaluated end to end; the primary is listed first in every table
+primary_version: filtered     # A5 gate and the validation check run on it
+
+train_json: metadata/replogle_train.json                            # the 2,000 model genes (order)
+split_json: experiments/perturbation_direction/splits/replogle_val60.json  # 60 val / 312 test of the 372
+
+ground_truth:                 # ground_truth.py, as for the frozen STATE truth (CP10k over the 2,000 genes, log1p)
+  pert_key: gene
+  control: non-targeting
+  context_key: cell_line
+  target_context: hepg2       # perturbed cells from the test file, controls of this line from the train file
+  min_cells: 15               # per half for the split-half ceiling; keeps all 372 HepG2 test targets
+  alpha: 0.05
+  min_lfc: 0.1
+  seed: 0
+
+frozen:                       # the STATE-based truth the primary version must reproduce (A5, a gate)
+  truth: outputs/perturbation_direction/replogle/truth                   # 372 perturbations
+  truth_test: outputs/perturbation_direction/replogle/truth_test312      # its 312-perturbation test subset
+  a5_tol: 1.0e-9
+  summary: results/replogle_test312_w2ema_3seeds_summary.csv             # report only: primary own panel vs frozen
+  summary_specific: results/replogle_test312_w2ema_3seeds_summary_specific.csv
+
+baselines:                    # baselines.py: generic, transfer, kNN (refitted on each version's train file)
+  min_cells: 20
+learned:                      # learned_baselines.py: prior and MLP, always both (MLP seeded)
+  min_cells: 20
+  alpha: 0.05
+  min_lfc: 0.1
+  embedding_dim: 128
+  epochs: 5
+  batch_size: 4096
+  seed: 0
+  device: auto                # auto = cuda if available else cpu (the script's default); env DEVICE overrides
+
+# Generations are reused, not regenerated (sha256 identical to the local copies). On student03 they live in the
+# generation job dir; locally use generation_dir=outputs/perturbation_direction/replogle.
+generation_dir: /system/user/studentwork/fleischa/scldm_generation_20261020/outputs/perturbation_direction/replogle
+
+selection:                    # validation check: the frozen guidance choice, rescored on the primary val truth
+  sweep:                      # control + 60 val perturbations, 64 cells, seed 0. Listed one by one: the sweep dir
+    w1: ${generation_dir}/sweep/w1.parquet          # also holds *_sample.parquet files, which select_sweep.py
+    w1_ema: ${generation_dir}/sweep/w1_ema.parquet  # would read as extra configs if pointed at the directory
+    w2: ${generation_dir}/sweep/w2.parquet
+    w2_ema: ${generation_dir}/sweep/w2_ema.parquet
+    w4: ${generation_dir}/sweep/w4.parquet
+    w4_ema: ${generation_dir}/sweep/w4_ema.parquet
+  expected: w2_ema            # the frozen choice; the run stops if the rescored sweep picks anything else
+  frozen_json: outputs/perturbation_direction/replogle/selection.json  # its table is compared (report); null skips
+  tie_tolerance: 0.005
+
+preds:                        # the main table's scLDM rows: control + 312 test perturbations, 64 cells, w2 + EMA
+  scLDM_s0: ${generation_dir}/pred/test312_w2_ema_seed0.parquet
+  scLDM_s1: ${generation_dir}/pred/test312_w2_ema_seed1.parquet
+  scLDM_s2: ${generation_dir}/pred/test312_w2_ema_seed2.parquet
+reference: scLDM_s0           # paired tests: reference vs every other row, Holm per (report, version) column
+
+controls:                     # optional generation controls, scored with the reference in eval_controls_<v> and
+  scLDM_w2_ema_cells128: ${generation_dir}/pred/test312_w2_ema_cells128.parquet  # tabulated separately
+  scLDM_w1: ${generation_dir}/pred/test312_w1.parquet                            # (<results_tag>_controls_*);
+  scLDM_w0: ${generation_dir}/pred/test312_w0.parquet                            # a missing file is skipped
+
+evaluate:                     # evaluate.py (always --exclude-target; --specific-ref = that version's delta_generic)
+  min_degs: 5
+  eps: 0.0
+  seed: 0                     # shuffled-control derangement
+
+stats:                        # side_by_side.py, the frozen tables' conventions (stats.py)
+  metric: balanced_acc
+  n_boot: 2000
+  seed: 0
