@@ -67,8 +67,8 @@ baseline loses by 0.02-0.16 with p < 1e-4.
 ## Replogle HepG2, raw rebuild: filtered | all side by side
 
 Tables written by `side_by_side.py` into `results/replogle_raw_hvg2000/` with tag
-`replogle_raw_test312_w2ema_3seeds`. The provenance records git `dirty=true` (commit
-`5b87135`); the tables will be regenerated from a clean commit.
+`replogle_raw_test312_w2ema_3seeds`, generated on student03 from the clean commit `ab1287d`
+(provenance `dirty=false`). A first run from an uncommitted tree gave byte-identical tables.
 
 Output files per `side_by_side.py table`:
 
