@@ -7,7 +7,6 @@ from pathlib import Path
 import anndata as ad
 import numpy as np
 import pandas as pd
-import pytest
 from scipy import sparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "experiments" / "perturbation_direction"))
@@ -44,8 +43,7 @@ def test_welch_degs_finds_shifted_genes():
     assert (delta.loc["P", ["g0", "g1", "g2"]] > 0).all() and (delta.loc["P", ["g3", "g4", "g5"]] < 0).all()
 
 
-@pytest.mark.parametrize("models", [["prior", "gbdt", "mlp", "bilinear"]])
-def test_learned_baselines_end_to_end(tmp_path, models):
+def test_learned_baselines_end_to_end(tmp_path):
     """Clusters of perturbations share a response in each line; the target line's response differs from the other
     lines' but is shared within a cluster, so it can only be learned from the target line's training perturbations."""
     rng = np.random.default_rng(1)
@@ -107,8 +105,6 @@ def test_learned_baselines_end_to_end(tmp_path, models):
             "cell_line",
             "--target-context",
             "T",
-            "--models",
-            *models,
             "--epochs",
             "30",
             "--batch-size",
@@ -124,13 +120,14 @@ def test_learned_baselines_end_to_end(tmp_path, models):
     info = json.loads((out / "learned_info.json").read_text())
     assert set(info["labels_per_context"]) == {"A", "B", "T"}
     assert info["test_perts_without_embedding"] == []
+    assert set(info["models"]) == {"prior", "mlp"}  # always both, no model selection flag
 
     evaluate.main(
         [
             "--truth-dir",
             str(truth),
             "--baseline",
-            *[f"{m}={out / f'delta_{m}.parquet'}" for m in models],
+            *[f"{m}={out / f'delta_{m}.parquet'}" for m in ("prior", "mlp")],
             "--min-degs",
             "1",
             "--out-dir",
@@ -138,5 +135,4 @@ def test_learned_baselines_end_to_end(tmp_path, models):
         ]
     )
     s = pd.read_csv(tmp_path / "eval" / "summary.csv", index_col=0)["balanced_acc_median"]
-    for m in ("mlp", "gbdt"):
-        assert s[m] > 0.85, s  # cluster structure + target-line training perturbations -> right directions
+    assert s["mlp"] > 0.85, s  # cluster structure + target-line training perturbations -> right directions

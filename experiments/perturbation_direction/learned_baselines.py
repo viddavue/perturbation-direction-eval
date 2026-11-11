@@ -9,7 +9,7 @@ Training data (no test information):
   * perturbation embeddings: SVD of each perturbation's effect profile in the OTHER contexts only, so training and
     test perturbations are represented the same way (test perturbations have no target-context profile).
 
-Models: prior, bilinear, mlp, gbdt (see direction_models.py). Each writes delta_<model>.parquet with
+Models: prior and mlp, always both (see direction_models.py). Each writes delta_<model>.parquet with
 P(up) - 0.5 for the test perturbations x genes in the target context, which evaluate.py scores like any other
 effect prediction (only the sign is meaningful).
 
@@ -34,19 +34,8 @@ import torch
 from anndata.io import read_elem
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from direction_models import (
-    BilinearModel,
-    EmbeddingTable,
-    GBDTModel,
-    MLPModel,
-    PriorModel,
-    predict_torch,
-    svd_embeddings,
-    train_torch,
-)
+from direction_models import EmbeddingTable, MLPModel, PriorModel, predict_torch, svd_embeddings, train_torch
 from ground_truth import group_stats, load_cells, lognorm, welch_degs
-
-MODELS = ("prior", "bilinear", "mlp", "gbdt")
 
 
 def context_effects_and_labels(args, context: str, genes: list[str], exclude: set[str], out: pathlib.Path):
@@ -91,7 +80,6 @@ def main(argv=None):
     ap.add_argument("--control", required=True)
     ap.add_argument("--context-key", required=True)
     ap.add_argument("--target-context", required=True)
-    ap.add_argument("--models", nargs="+", default=list(MODELS), choices=MODELS)
     ap.add_argument("--alpha", type=float, default=0.05)
     ap.add_argument("--min-lfc", type=float, default=0.1)
     ap.add_argument("--min-cells", type=int, default=20)
@@ -156,39 +144,40 @@ def main(argv=None):
         "models": {},
     }
 
-    for name in args.models:
-        log(f"training {name}")
-        if name == "prior":
-            proba = PriorModel().fit(labels).predict_proba(grid)
-        elif name == "gbdt":
-            proba = GBDTModel(pert_emb, target_emb, sorted(cells), seed=args.seed).fit(labels).predict_proba(grid)
-        else:
-            pt, tt = EmbeddingTable(pert_emb), EmbeddingTable(target_emb)
-            cls = BilinearModel if name == "bilinear" else MLPModel
-            model = cls(pt, tt, n_cells=len(cells))
-
-            def idx(df, pt=pt, tt=tt):
-                return (
-                    pt.lookup(df["pert"]),
-                    tt.lookup(df["target"]),
-                    torch.as_tensor(df["context"].map(cells).fillna(0).to_numpy(np.int64)),
-                )
-
-            train_torch(
-                model,
-                *idx(labels),
-                labels["label"].to_numpy(),
-                epochs=args.epochs,
-                batch_size=args.batch_size,
-                device=args.device,
-                seed=args.seed,
-                log=log,
-            )
-            proba = predict_torch(model, *idx(grid), device=args.device)
+    def write(name, proba):
         pred = pd.DataFrame(proba.reshape(len(test_perts), len(genes)) - 0.5, index=test_perts, columns=genes)
         pred.to_parquet(out / f"delta_{name}.parquet")
         info["models"][name] = {"mean_p_up": float(proba.mean())}
         log(f"wrote {out / f'delta_{name}.parquet'}")
+
+    log("training prior")
+    write("prior", PriorModel().fit(labels).predict_proba(grid))
+
+    log("training mlp")
+    # seed before construction: the MLP's initial weights were drawn from an unseeded generator,
+    # so delta_mlp.parquet differed between processes even with the same --seed
+    torch.manual_seed(args.seed)
+    pt, tt = EmbeddingTable(pert_emb), EmbeddingTable(target_emb)
+    model = MLPModel(pt, tt, n_cells=len(cells))
+
+    def idx(df):
+        return (
+            pt.lookup(df["pert"]),
+            tt.lookup(df["target"]),
+            torch.as_tensor(df["context"].map(cells).fillna(0).to_numpy(np.int64)),
+        )
+
+    train_torch(
+        model,
+        *idx(labels),
+        labels["label"].to_numpy(),
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        device=args.device,
+        seed=args.seed,
+        log=log,
+    )
+    write("mlp", predict_torch(model, *idx(grid), device=args.device))
 
     (out / "learned_info.json").write_text(json.dumps(info, indent=1, default=str))
 

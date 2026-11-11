@@ -7,11 +7,9 @@
             perturbations (in the target context if it has perturbed training cells, else in the
             other contexts). Catches predictions that only encode a generic "perturbed vs control" shift.
 
-  transfer_<ctx>  As ``transfer`` but from a single other context (e.g. transfer_k562).
-  calibrated  Per-gene ridge regression target_effect ~ b + sum_ctx w_ctx * effect_ctx, fitted on the
-              target context's TRAINING perturbations (never the test ones), alpha by K-fold CV.
-  knn         Correlation-weighted mean target-context effect of the k target-context training
-              perturbations whose other-context effects are most similar; k by K-fold CV.
+  knn       Correlation-weighted mean target-context effect of the k target-context training
+            perturbations whose other-context effects are most similar; fitted on the target context's
+            TRAINING perturbations only (never the test ones), k by K-fold CV.
 
 All are written as perturbation x gene effect matrices (log1p(CP10k) differences), directly
 comparable to ``delta_true.parquet`` from ground_truth.py. Per-context effects of all training
@@ -32,7 +30,7 @@ from anndata.io import read_elem
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from ground_truth import group_means, load_cells, lognorm
-from transfer_models import calibrated_transfer, knn_transfer
+from transfer_models import knn_transfer
 
 
 def main(argv=None):
@@ -92,9 +90,6 @@ def main(argv=None):
     generic = pd.DataFrame(np.tile(generic_vec.to_numpy(), (len(perts), 1)), index=perts, columns=genes)
     generic.to_parquet(out / "delta_generic.parquet")
 
-    for c in others:
-        effects[c].reindex(perts).dropna(how="all").to_parquet(out / f"delta_transfer_{c}.parquet")
-
     learned = {}
     n_target_train = 0 if in_target is None else len(set(in_target.index) - set(perts))
     if n_target_train >= 10:
@@ -104,15 +99,11 @@ def main(argv=None):
                 f"WARNING: {len(leaked)} test perturbations have target-context TRAINING cells; excluded from fitting"
             )
         train_perts = sorted(set(in_target.index) - set(perts))
-        cal, learned["calibrated"] = calibrated_transfer(
-            effects, args.target_context, others, train_perts, perts, genes
-        )
-        cal.to_parquet(out / "delta_calibrated.parquet")
         knn, learned["knn"] = knn_transfer(effects, args.target_context, others, train_perts, perts, genes)
         knn.to_parquet(out / "delta_knn.parquet")
         learned["test_perts_with_target_train_cells"] = leaked
     else:
-        print(f"only {n_target_train} target-context training perturbations: calibrated/knn baselines skipped")
+        print(f"only {n_target_train} target-context training perturbations: knn baseline skipped")
 
     info = {
         "contexts_with_controls": list(effects),

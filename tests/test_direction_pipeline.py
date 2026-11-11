@@ -99,7 +99,7 @@ def test_pipeline_recovers_known_directions(tmp_path):
     info = json.loads((base / "baselines_info.json").read_text())
     assert info["generic_source"] == "target_context_train" and info["target_context_train_perturbations"] == 1
     assert info["learned_baselines"] == {}  # too few target-context training perturbations to fit
-    assert (base / "delta_transfer_A.parquet").exists() and (base / "delta_transfer_B.parquet").exists()
+    assert not list(base.glob("delta_transfer_*.parquet"))  # per-line transfer files are no longer written
 
     # an oracle "model": profiles equal to the true pseudobulk means (control row + perturbation rows)
     log = ground_truth.lognorm(ad.concat([test, train[(train.obs.cell_line == "T") & (train.obs.gene == CTRL)]]))
@@ -208,7 +208,7 @@ def test_learned_baselines_and_specific_report(tmp_path):
 
     log = ground_truth.lognorm(ad.concat([test, train[(train.obs.cell_line == "T") & (train.obs.gene == CTRL)]]))
     ground_truth.group_means(log, "gene").loc[[CTRL, *test_perts]].to_parquet(tmp_path / "oracle.parquet")
-    baseline_args = [f"{n}={base / f'delta_{n}.parquet'}" for n in ("transfer", "generic", "calibrated", "knn")]
+    baseline_args = [f"{n}={base / f'delta_{n}.parquet'}" for n in ("transfer", "generic", "knn")]
     evaluate.main(
         [
             "--truth-dir",

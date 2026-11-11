@@ -1,6 +1,6 @@
-"""Learned cross-context baselines for perturbation effects.
+"""Learned cross-context baseline for perturbation effects: kNN transfer.
 
-They predict a perturbation's effect in a target context from its effects in other contexts, fitted on
+It predicts a perturbation's effect in a target context from its effects in other contexts, fitted on
 perturbations that were observed in the target context during training.
 
 Inputs are effect matrices (perturbation x gene, log1p(CP10k) differences vs control), one per context.
@@ -37,61 +37,6 @@ def _kfold(n: int, k: int, seed: int):
         raise ValueError(f"need at least {2 * k} target-context training perturbations for {k}-fold CV, got {n}")
     idx = np.random.default_rng(seed).permutation(n)
     return np.array_split(idx, min(k, n))
-
-
-def _ridge_per_gene(X: np.ndarray, Y: np.ndarray, alpha: float):
-    """Independent ridge per gene. X: (n, G, L) features, Y: (n, G). Returns (W (G, L), b (G,)).
-
-    Features and targets are centred per gene; the intercept is not penalised.
-    """
-    xm, ym = X.mean(0), Y.mean(0)  # (G, L), (G,)
-    Xc, Yc = X - xm, Y - ym
-    XtX = np.einsum("ngl,ngm->glm", Xc, Xc) + alpha * np.eye(X.shape[-1])
-    XtY = np.einsum("ngl,ng->gl", Xc, Yc)
-    W = np.linalg.solve(XtX, XtY[..., None])[..., 0]
-    b = ym - np.einsum("gl,gl->g", xm, W)
-    return W, b
-
-
-def calibrated_transfer(
-    effects: dict[str, pd.DataFrame],
-    target: str,
-    others: list[str],
-    train_perts: list[str],
-    test_perts: list[str],
-    genes: list[str],
-    alphas=(0.01, 0.1, 1.0, 10.0, 100.0),
-    n_folds: int = 5,
-    seed: int = 0,
-) -> tuple[pd.DataFrame, dict]:
-    """Per-gene ridge: target effect ~ b_g + sum_l w_gl * effect_l, alpha chosen by K-fold CV (MSE)."""
-    X_tr = fill_missing_contexts(stack_others(effects, others, train_perts, genes))
-    keep = ~np.isnan(X_tr).any(axis=(1, 2))
-    X_tr = X_tr[keep]
-    Y_tr = effects[target].reindex(index=train_perts, columns=genes).to_numpy()[keep]
-    folds = _kfold(len(X_tr), n_folds, seed)
-    cv = {}
-    for a in alphas:
-        err = 0.0
-        for f in folds:
-            m = np.ones(len(X_tr), dtype=bool)
-            m[f] = False
-            W, b = _ridge_per_gene(X_tr[m], Y_tr[m], a)
-            err += float(((np.einsum("ngl,gl->ng", X_tr[f], W) + b - Y_tr[f]) ** 2).sum())
-        cv[a] = err / Y_tr.size
-    best = min(cv, key=cv.get)
-    W, b = _ridge_per_gene(X_tr, Y_tr, best)
-
-    X_te = fill_missing_contexts(stack_others(effects, others, test_perts, genes))
-    pred = np.einsum("ngl,gl->ng", X_te, W) + b
-    out = pd.DataFrame(pred, index=test_perts, columns=genes).dropna(how="all")
-    info = {
-        "alpha": best,
-        "cv_mse": cv,
-        "n_train": int(len(X_tr)),
-        "mean_weight_per_context": dict(zip(others, W.mean(0).round(3).tolist(), strict=True)),
-    }
-    return out, info
 
 
 def _corr_rows(A: np.ndarray, B: np.ndarray) -> np.ndarray:

@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "experiments" / "perturbation_direction"))
 
-from transfer_models import calibrated_transfer, fill_missing_contexts, knn_transfer
+from transfer_models import fill_missing_contexts, knn_transfer
 
 GENES = [f"g{i}" for i in range(20)]
 
@@ -26,37 +26,6 @@ def test_fill_missing_contexts_uses_mean_of_observed():
     out = fill_missing_contexts(X)
     np.testing.assert_allclose(out[0, 0], [1.0, 2.0, 3.0])
     assert np.isnan(out[1]).all()
-
-
-def test_calibration_learns_per_gene_sign_flips_that_plain_transfer_gets_wrong():
-    rng = np.random.default_rng(0)
-    perts = [f"p{i}" for i in range(300)]
-    base = rng.normal(size=(300, 20))
-    flip = np.where(np.arange(20) < 10, -1.0, 1.0)  # first 10 genes respond oppositely in the target line
-    effects = {
-        "a": frame(base + 0.05 * rng.normal(size=base.shape), perts),
-        "b": frame(base + 0.05 * rng.normal(size=base.shape), perts),
-        "T": frame(base * flip * 2 + 0.05 * rng.normal(size=base.shape), perts),
-    }
-    train, test = perts[:250], perts[250:]
-    pred, info = calibrated_transfer(effects, "T", ["a", "b"], train, test, GENES)
-    true = effects["T"].loc[test]
-    assert sign_acc(pred, true) > 0.97
-    plain = (effects["a"].loc[test] + effects["b"].loc[test]) / 2
-    assert 0.4 < sign_acc(plain, true) < 0.6  # half the genes flipped -> plain transfer ~50%
-    assert info["n_train"] == 250
-
-
-def test_calibration_never_uses_test_perturbations_in_target():
-    rng = np.random.default_rng(1)
-    perts = [f"p{i}" for i in range(100)]
-    base = rng.normal(size=(100, 20))
-    eff = {"a": frame(base, perts), "T": frame(base, perts)}
-    poisoned = {**eff, "T": eff["T"].copy()}
-    poisoned["T"].loc[perts[80:]] = 1e6  # target effects of test perturbations must be ignored
-    p1, _ = calibrated_transfer(eff, "T", ["a"], perts[:80], perts[80:], GENES)
-    p2, _ = calibrated_transfer(poisoned, "T", ["a"], perts[:80], perts[80:], GENES)
-    pd.testing.assert_frame_equal(p1, p2)
 
 
 def test_knn_recovers_cluster_specific_target_response():
@@ -85,11 +54,9 @@ def test_unseen_perturbations_get_no_prediction():
     train = perts[:8]
     pred, _ = knn_transfer(eff, "T", ["a"], train, ["p8"], GENES, ks=(1,), n_folds=2)
     assert pred.empty
-    pred, _ = calibrated_transfer(eff, "T", ["a"], train, ["p8"], GENES, n_folds=2)
-    assert pred.empty
 
 
 def test_too_few_training_perturbations_raise():
     eff = {"a": frame(np.ones((3, 20)), ["p0", "p1", "p2"]), "T": frame(np.ones((3, 20)), ["p0", "p1", "p2"])}
     with pytest.raises(ValueError, match="need at least"):
-        calibrated_transfer(eff, "T", ["a"], ["p0", "p1"], ["p2"], GENES)
+        knn_transfer(eff, "T", ["a"], ["p0", "p1"], ["p2"], GENES)
