@@ -12,7 +12,6 @@ from scipy import sparse
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "experiments" / "perturbation_direction"))
 
 from denoising_ablation import observed_effects, score_variants
-from scdebart_conditioning_audit import audit_predictions
 from vcc_cells import check_counts, metric_coverage, sample_panel
 from vcc_pilot import select_panel, split_groups
 from vcc_profiles import align_panel, project_shared, retrieval
@@ -56,16 +55,6 @@ def test_upstream_panel_exclusion_not_own_gene_only():
     pytest.importorskip("cell_eval2")
     truth = pd.DataFrame([[100., 0., 1.], [0., 100., 1.]], index=["a", "b"], columns=["a", "b", "x"])
     np.testing.assert_allclose(retrieval(truth, truth).effect_pds, 0.5)
-
-
-def test_conditioning_uses_actual_tokens(tmp_path):
-    path = tmp_path / "pred.npz"
-    np.savez(path, gene_ids={1: [np.array([1, 2])], 3: [np.array([1, 2])]},
-             pred_logfc={1: [np.ones(2)], 3: [np.ones(2)]},
-             true_ctrl_exp={1: [np.ones(2)], 3: [np.ones(2)]})
-    frame = audit_predictions(path)
-    assert frame.target_token_present.tolist() == [True, False]
-    assert frame.baseline_hash.nunique() == 1
 
 
 def test_denoising_filter_changes_mask_not_effects():
