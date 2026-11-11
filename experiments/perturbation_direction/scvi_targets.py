@@ -49,7 +49,7 @@ import pandas as pd
 import scvi
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from ground_truth import load_cells, parse_context  # noqa: E402
+from ground_truth import load_cells, parse_context
 
 
 def mask_low_detection(logfc: np.ndarray, nz1: np.ndarray, nz2: np.ndarray, threshold: float = 0.3) -> np.ndarray:

@@ -48,8 +48,8 @@ import pandas as pd
 from scipy import sparse
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from ground_truth import load_cells, lognorm, parse_context  # noqa: E402
-from metrics import direction_metrics  # noqa: E402
+from ground_truth import load_cells, lognorm, parse_context
+from metrics import direction_metrics
 
 
 def pseudobulk_cp10k(adata: ad.AnnData, key: str, prior: float = 0.5) -> pd.DataFrame:

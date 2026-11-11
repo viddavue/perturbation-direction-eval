@@ -11,7 +11,7 @@ from scipy import sparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "experiments" / "perturbation_direction"))
 
-from target_variants import ceiling_rows, log2_effect, pseudobulk_cp10k  # noqa: E402
+from target_variants import ceiling_rows, log2_effect, pseudobulk_cp10k
 
 GENES = ["g0", "g1", "g2"]
 

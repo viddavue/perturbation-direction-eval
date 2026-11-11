@@ -19,8 +19,8 @@ def make_truth(tmp_path, perts=("p1", "p2", "p3")):
     frame.to_parquet(src / "delta_true.parquet")
     (frame.abs() > 2).to_parquet(src / "deg.parquet")
     frame.to_csv(src / "ceiling.csv")
-    (src / "info.json").write_text(json.dumps({"n_cells": {p: 10 for p in perts},
-                                               "n_degs": {p: 5 for p in perts}}))
+    (src / "info.json").write_text(json.dumps({"n_cells": dict.fromkeys(perts, 10),
+                                               "n_degs": dict.fromkeys(perts, 5)}))
     split = tmp_path / "split.json"
     split.write_text(json.dumps({"test": ["p1", "p3"], "val": ["p2"]}))
     return src, split

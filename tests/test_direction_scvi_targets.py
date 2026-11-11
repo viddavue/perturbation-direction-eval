@@ -7,7 +7,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "experiments" / "perturbation_direction"))
 
-from scvi_targets import mask_low_detection  # noqa: E402
+from scvi_targets import mask_low_detection
 
 
 def test_genes_detected_in_both_arms_keep_their_value():
