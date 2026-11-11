@@ -241,7 +241,15 @@ def main(argv=None):
     out.mkdir(parents=True, exist_ok=True)
     info = json.loads((truth_dir / "info.json").read_text())
     delta_true = pd.read_parquet(truth_dir / "delta_true.parquet")
-    deg = pd.read_parquet(truth_dir / "deg.parquet")
+    # a truth dir without a deg.parquet (e.g. a sensitivity sweep that only stored effects) still
+    # scores: DEGs are then recomputed with the same rule ground_truth.py applies
+    if (truth_dir / "deg.parquet").exists():
+        deg = pd.read_parquet(truth_dir / "deg.parquet")
+    else:
+        padj = pd.read_parquet(truth_dir / "padj.parquet")
+        deg = (padj < info.get("alpha", 0.05)) & (delta_true.abs() > info.get("min_lfc", 0.1))
+        print(f"no deg.parquet in {truth_dir}: rebuilt DEGs from padj at alpha={info.get('alpha', 0.05)}, "
+              f"min_lfc={info.get('min_lfc', 0.1)}")
     perts = list(delta_true.index)
     exclude = {p: [p] for p in perts} if args.exclude_target else None
 
@@ -252,7 +260,14 @@ def main(argv=None):
         missing = sorted(set(perts) - set(prof.index))
         if missing:
             print(f"[{name}] no prediction for {len(missing)} perturbations, e.g. {missing[:5]}")
-        delta = prof.loc[prof.index.intersection(perts)] - prof.loc[info["control"]]
+        # A named pred is expected to carry the control row. If it is itself an effect matrix
+        # (control row absent), use it as the effect -- otherwise a raw sensitivity truth without
+        # a "non-targeting" index cannot be scored against predictions that were built elsewhere.
+        if info["control"] in prof.index:
+            delta = prof.loc[prof.index.intersection(perts)] - prof.loc[info["control"]]
+        else:
+            print(f"[{name}] has no {info['control']!r} row: treating the file as an effect matrix")
+            delta = prof.loc[prof.index.intersection(perts)]
         methods[name] = delta
         methods[f"{name} (shuffled)"] = shuffled_prediction(delta, seed=args.seed)
         tg = [p for p in delta.index if p in delta.columns]
