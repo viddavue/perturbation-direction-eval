@@ -2,7 +2,9 @@
 
 run_replogle_raw_eval.sh evaluates each version end to end (its own ground truth, baselines refitted on its own
 train file, evaluate.py on its own test truth). This script puts those evaluate.py output dirs next to each
-other, for both of evaluate.py's reports (full effect, perturbation-specific component).
+other, for each of evaluate.py's reports: the direction of the full effect, the direction of the
+perturbation-specific component, and changed vs unchanged genes (does the predicted effect size separate the
+DEGs from the genes that clearly do not change?).
 
 Conventions (those of the frozen ``results/replogle_test312_w2ema_3seeds_*`` tables; statistics from stats.py)
 ------------------------------------------------------------------------------------------------------------
@@ -20,6 +22,13 @@ Conventions (those of the frozen ``results/replogle_test312_w2ema_3seeds_*`` tab
 * n can be below the panel size for any method: balanced accuracy is undefined without both up and down DEGs.
 * A method missing from a version or a report (``generic`` never has a perturbation-specific part: evaluate.py
   drops pure shared-response predictions there) is reported as missing, never dropped silently.
+* **Changed vs unchanged genes** has its own headline metric (``--unchanged-metric``, default ``detect_auroc``;
+  ``--metric`` applies to the two direction reports) and its own panel rule, evaluate.py's: >= ``--min-degs``
+  scored DEGs AND >= ``--min-unchanged`` unchanged genes, target excluded. Everything else is as above; the
+  split-half ceiling needs both counts in its own half too. Methods declared direction-only (``mlp``,
+  ``prior``: a direction confidence, not an effect size) are missing from it by design. An eval dir written
+  before the report existed does not have it: the report is then marked missing for that version, and the
+  shared panel is taken over the versions that have it.
 
 Subcommands
 -----------
@@ -28,11 +37,14 @@ Subcommands
 ``config``          print replogle_raw_eval.yaml, resolved, as shell assignments (read by run_replogle_raw_eval.sh)
 
 Outputs of ``table`` in --out-dir (``<tag>`` = --tag):
-  <tag>_side_by_side.csv, <tag>_side_by_side_specific.csv  wide tables, one row per method, ``<version>_<stat>``
+  <tag>_side_by_side.csv, <tag>_side_by_side_specific.csv, <tag>_side_by_side_unchanged.csv
+                                 wide tables, one per report, one row per method, ``<version>_<stat>``
   <tag>_side_by_side_long.csv    the same numbers in long form (report, version, method)
   <tag>_side_by_side_panel.csv   per report and perturbation: n_deg per version, own-panel and shared membership
-  <tag>_side_by_side_vs_frozen.csv  (with --frozen-summary) primary own panel vs a frozen summary table
-  <tag>_side_by_side.md          the markdown table
+                                 (and n_unchanged per version for the changed-vs-unchanged report)
+  <tag>_side_by_side_vs_frozen.csv  (with --frozen-summary, full|specific only) primary own panel vs a frozen
+                                 summary table
+  <tag>_side_by_side.md          the markdown tables (+ the changed-vs-unchanged report's secondary medians)
   <tag>.provenance.json          git commit + dirty flag, sha256 of every input, settings, timestamp
 """
 
@@ -57,8 +69,28 @@ from freeze_results import read_per_perturbation, sha256
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 VERSIONS = ("filtered", "all")  # prepare_replogle_raw.py's versions
-REPORTS = {"full": "", "specific": "_specific"}  # report -> evaluate.py file suffix
-REPORT_TITLES = {"full": "Full effect", "specific": "Perturbation-specific component (shared response projected out)"}
+REPORTS = {"full": "", "specific": "_specific", "unchanged": "_unchanged"}  # report -> evaluate.py file suffix
+REPORT_TITLES = {
+    "full": "Full effect",
+    "specific": "Perturbation-specific component (shared response projected out)",
+    "unchanged": "Changed vs unchanged genes",
+}
+UNCHANGED = "unchanged"  # the report with its own headline metric and panel rule
+OPTIONAL_REPORTS = (UNCHANGED,)  # absent from eval dirs written before the report existed
+FROZEN_REPORTS = ("full", "specific")  # what --frozen-summary can compare (freeze_results.py's reports)
+REPORT_MISSING = (
+    "report not in this eval dir (written before evaluate.py had it, with --no-unchanged-report, "
+    "or from a truth dir without padj.parquet)"
+)
+SECONDARY = (  # the changed-vs-unchanged report's secondary per-perturbation metrics, tabulated as medians
+    "three_class_balanced_acc",
+    "deg_call_rate",
+    "deg_hit_rate",
+    "unchanged_call_rate",
+    "abs_pred_deg_median",
+    "abs_pred_unchanged_median",
+    "detect_auroc_all",
+)
 BASELINE_ORDER = ("knn", "mlp", "generic", "transfer", "prior")
 KIND_ORDER = ("pred", "baseline", "shuffled", "ceiling", "other")
 STATS = ("n", "median", "ci_low", "ci_high", "n_paired", "diff", "diff_ci_low", "diff_ci_high", "p_raw", "p_holm")
@@ -99,16 +131,35 @@ def is_ceiling(stem: str) -> bool:
 # ---------------------------------------------------------------------------
 # reading
 # ---------------------------------------------------------------------------
+def report_written(eval_dir: pathlib.Path, report: str, manifest: dict | None) -> bool:
+    """Does the eval dir hold this (optional) report?
+
+    It needs per-perturbation tables. A methods.json that records the report as null was written by a run
+    without it: tables left behind by an earlier run in the same directory are then stale and not read.
+    """
+    if not any((eval_dir / f"per_perturbation{REPORTS[report]}").glob("*.csv")):
+        return False
+    return not (manifest is not None and report in manifest and manifest[report] is None)
+
+
 def read_eval(eval_dir: str | pathlib.Path) -> tuple[dict[str, dict[str, pd.DataFrame]], list[dict]]:
-    """Per-perturbation tables of both reports ({report: {method: frame}}) and the methods.json entries."""
+    """Per-perturbation tables of every report ({report: {method: frame}}) and the methods.json entries.
+
+    A report in ``OPTIONAL_REPORTS`` that the eval dir does not hold is left out of the dict.
+    """
     eval_dir = pathlib.Path(eval_dir)
-    frames = {report: read_per_perturbation(eval_dir, suffix) for report, suffix in REPORTS.items()}
-    manifest = eval_dir / "methods.json"
-    methods = json.loads(manifest.read_text())["methods"] if manifest.exists() else []
-    return frames, methods
+    path = eval_dir / "methods.json"
+    manifest = json.loads(path.read_text()) if path.exists() else None
+    frames = {}
+    for report, suffix in REPORTS.items():
+        if report in OPTIONAL_REPORTS and not report_written(eval_dir, report, manifest):
+            continue
+        frames[report] = read_per_perturbation(eval_dir, suffix)
+    return frames, (manifest["methods"] if manifest is not None else [])
 
 
 EVAL_SETTINGS = ("exclude_target", "eps", "min_degs", "control")
+UNCHANGED_SETTINGS = ("max_effect", "min_padj", "min_unchanged", "tau")  # methods.json["unchanged"] keys
 
 
 def check_eval_settings(eval_dirs: dict[str, str | pathlib.Path]) -> dict[str, dict]:
@@ -133,6 +184,23 @@ def check_eval_settings(eval_dirs: dict[str, str | pathlib.Path]) -> dict[str, d
     return settings
 
 
+def check_unchanged_settings(eval_dirs: dict[str, str | pathlib.Path]) -> dict[str, dict | None]:
+    """The changed-vs-unchanged settings each eval dir recorded: {version: methods.json["unchanged"] or None}.
+
+    None for a version without the report. The thresholds that define the unchanged genes and the call
+    threshold must agree across the versions that have it (exits otherwise).
+    """
+    settings = {}
+    for v, d in eval_dirs.items():
+        manifest = pathlib.Path(d) / "methods.json"
+        settings[v] = json.loads(manifest.read_text()).get(UNCHANGED) if manifest.exists() else None
+    have = [s for s in settings.values() if s]
+    differ = sorted(k for k in UNCHANGED_SETTINGS if any(s.get(k) != have[0].get(k) for s in have))
+    if differ:
+        raise SystemExit(f"evaluate.py changed-vs-unchanged settings differ between versions for {differ}: {settings}")
+    return settings
+
+
 def method_order(evals: dict[str, dict[str, dict[str, pd.DataFrame]]], manifests: dict[str, list[dict]]):
     """Every method seen in any version/report, ordered: preds, baselines, shuffled controls, ceiling, others.
 
@@ -146,7 +214,7 @@ def method_order(evals: dict[str, dict[str, dict[str, pd.DataFrame]]], manifests
             seen.append(stem)
     for per_report in evals.values():
         for frames in per_report.values():
-            for stem in sorted(frames):
+            for stem in sorted(frames or {}):
                 kinds.setdefault(stem, "ceiling" if is_ceiling(stem) else "other")
                 seen.append(stem)
     first = {s: i for i, s in reversed(list(enumerate(seen)))}
@@ -162,16 +230,17 @@ def method_order(evals: dict[str, dict[str, dict[str, pd.DataFrame]]], manifests
 # ---------------------------------------------------------------------------
 # panels and statistics
 # ---------------------------------------------------------------------------
-def scored_degs(frames: dict[str, pd.DataFrame]) -> tuple[pd.Series, list[str]]:
+def scored_degs(frames: dict[str, pd.DataFrame], column: str = "n_deg") -> tuple[pd.Series, list[str]]:
     """Scored DEGs per perturbation, from the non-ceiling methods' ``n_deg`` (a property of the truth).
 
     Every non-ceiling method of one evaluate.py report scores the same DEGs, so their ``n_deg`` agree; the
     perturbations where they do not are returned (the maximum is used). The ceiling is left out: its DEGs come
-    from half the cells.
+    from half the cells. ``column``: another gene count of the truth to read the same way (``n_unchanged``,
+    the unchanged genes of the changed-vs-unchanged report).
     """
-    cols = {m: f["n_deg"] for m, f in frames.items() if not is_ceiling(m)}
+    cols = {m: f[column] for m, f in frames.items() if not is_ceiling(m)}
     if not cols:
-        raise ValueError("no non-ceiling method to read the scored DEGs from")
+        raise ValueError(f"no non-ceiling method to read {column} from")
     table = pd.DataFrame(cols)
     inconsistent = sorted(table.index[table.nunique(axis=1, dropna=True) > 1])
     return table.max(axis=1), inconsistent
@@ -220,54 +289,98 @@ def column_stats(
     return out, notes
 
 
+def secondary_medians(frames: dict[str, pd.DataFrame], panel: set[str], min_degs: int) -> pd.DataFrame:
+    """Median of every ``SECONDARY`` metric per method over the panel (method x metric, plus ``n``).
+
+    ``frames`` are the changed-vs-unchanged tables already restricted to >= min-unchanged unchanged genes;
+    as for the headline, a method (the ceiling) also needs >= ``min_degs`` DEGs of its own. ``n`` counts the
+    perturbations entering; a metric undefined for one of them (e.g. the three-class accuracy without up and
+    down DEGs) skips it.
+    """
+    rows = {}
+    for m, f in frames.items():
+        f = f.loc[f.index.intersection(sorted(panel))]
+        f = f[f["n_deg"] >= min_degs]
+        rows[m] = {"n": len(f), **{c: (f[c].median() if c in f else np.nan) for c in SECONDARY}}
+    return pd.DataFrame(rows, dtype=float).T.reindex(columns=["n", *SECONDARY])
+
+
 def side_by_side(
     evals: dict[str, dict[str, dict[str, pd.DataFrame]]],
     manifests: dict[str, list[dict]],
     *,
     reference: str,
     metric: str = "balanced_acc",
+    unchanged_metric: str = "detect_auroc",
     min_degs: int = 5,
+    min_unchanged: int = 20,
     n_boot: int = stats.DEFAULT_N_BOOT,
     seed: int = 0,
 ) -> dict:
-    """All numbers of the main table; ``evals`` is {version: {report: {method: per-perturbation frame}}}."""
+    """All numbers of the main table; ``evals`` is {version: {report: {method: per-perturbation frame}}}.
+
+    ``metric`` is the headline of the two direction reports, ``unchanged_metric`` that of the
+    changed-vs-unchanged report, whose panel also needs >= ``min_unchanged`` unchanged genes. A version
+    without a report (key absent or empty) is marked missing in it; that report's shared panel is then taken
+    over the versions that have it.
+    """
     versions = list(evals)
     order, kinds = method_order(evals, manifests)
-    long_rows, panel_rows, panels, notes = [], [], {}, {}
+    metrics = {report: unchanged_metric if report == UNCHANGED else metric for report in REPORTS}
+    long_rows, panel_rows, panels, notes, secondary = [], [], {}, {}, {}
     for report in REPORTS:
-        n_deg, own_panel, inconsistent = {}, {}, {}
-        for v in versions:
+        have = [v for v in versions if evals[v].get(report)]
+        n_deg, n_unchanged, own_panel, inconsistent = {}, {}, {}, {}
+        for v in have:
             n_deg[v], inconsistent[v] = scored_degs(evals[v][report])
-            own_panel[v] = set(n_deg[v].index[n_deg[v] >= min_degs])
-        shared = set.intersection(*own_panel.values())
-        allp = sorted(set().union(*(set(s.index) for s in n_deg.values())))
+            ok = n_deg[v] >= min_degs
+            if report == UNCHANGED:  # evaluate.py's panel rule for this report: enough unchanged genes too
+                n_unchanged[v], more = scored_degs(evals[v][report], "n_unchanged")
+                inconsistent[v] = sorted(set(inconsistent[v]) | set(more))
+                ok &= n_unchanged[v].reindex(ok.index) >= min_unchanged
+            own_panel[v] = set(ok.index[ok])
+        shared = set.intersection(*(own_panel[v] for v in have)) if have else set()
+        allp = sorted(set().union(*(set(n_deg[v].index) for v in have)))
         for p in allp:
             row = {"report": report, "perturbation": p}
             for v in versions:
-                row[f"n_deg_{v}"] = n_deg[v].get(p, np.nan)
-                row[f"panel_{v}"] = p in own_panel[v]
+                row[f"n_deg_{v}"] = n_deg[v].get(p, np.nan) if v in have else np.nan
+                row[f"panel_{v}"] = v in have and p in own_panel[v]
             row["shared"] = p in shared
+            for v in versions:
+                row[f"n_unchanged_{v}"] = n_unchanged[v].get(p, np.nan) if v in n_unchanged else np.nan
             panel_rows.append(row)
         panels[report] = {
             "shared": len(shared),
-            "own": {v: len(own_panel[v]) for v in versions},
-            "only_in": {v: sorted(own_panel[v] - shared) for v in versions},
-            "absent_from": {v: sorted(set(allp) - set(n_deg[v].index)) for v in versions},
-            "n_deg_inconsistent": {v: inconsistent[v] for v in versions if inconsistent[v]},
+            "own": {v: len(own_panel[v]) for v in have},
+            "only_in": {v: sorted(own_panel[v] - shared) for v in have},
+            "absent_from": {v: sorted(set(allp) - set(n_deg[v].index)) for v in have},
+            "n_deg_inconsistent": {v: inconsistent[v] for v in have if inconsistent[v]},
+            "versions_without_report": [v for v in versions if v not in have],
         }
         notes[report] = {}
         for v in versions:
-            col, col_notes = column_stats(
-                evals[v][report],
-                shared,
-                reference=reference,
-                metric=metric,
-                min_degs=min_degs,
-                n_boot=n_boot,
-                seed=seed,
-            )
-            missing = [m for m in order if m not in evals[v][report]]
-            notes[report][v] = {"missing_methods": missing, "notes": col_notes}
+            if v in have:
+                frames = evals[v][report]
+                if report == UNCHANGED:
+                    # a perturbation enters a method's numbers with enough unchanged genes in that method's
+                    # table: the truth's for every method, half A's for the split-half ceiling
+                    frames = {m: f[f["n_unchanged"] >= min_unchanged] for m, f in frames.items()}
+                    secondary[v] = secondary_medians(frames, shared, min_degs)
+                col, col_notes = column_stats(
+                    frames,
+                    shared,
+                    reference=reference,
+                    metric=metrics[report],
+                    min_degs=min_degs,
+                    n_boot=n_boot,
+                    seed=seed,
+                )
+                missing = [m for m in order if m not in frames]
+                notes[report][v] = {"missing_methods": missing, "notes": col_notes}
+            else:
+                col = pd.DataFrame(columns=[*STATS, *OWN], dtype=float)
+                notes[report][v] = {"missing_methods": list(order), "notes": [REPORT_MISSING], "report_missing": True}
             for m in order:
                 row = {"report": report, "version": v, "method": m, "label": label(m), "kind": kinds[m]}
                 row["status"] = "ok" if m in col.index else "missing"
@@ -276,15 +389,19 @@ def side_by_side(
                     row[c] = col.loc[m, c] if m in col.index else np.nan
                 long_rows.append(row)
     long = pd.DataFrame(long_rows)
+    panel_cols = ["report", "perturbation", *[f"{k}_{v}" for v in versions for k in ("n_deg", "panel")], "shared"]
+    panel_cols += [f"n_unchanged_{v}" for v in versions]
     return {
         "long": long,
-        "panel": pd.DataFrame(panel_rows),
+        "panel": pd.DataFrame(panel_rows, columns=panel_cols),
         "panels": panels,
         "notes": notes,
         "order": order,
         "kinds": kinds,
         "versions": versions,
         "reference": reference,
+        "metrics": metrics,
+        "secondary": secondary,
     }
 
 
@@ -345,7 +462,80 @@ def _ci(lo, hi, signed: bool = False) -> str:
     return f" [{_num(lo, signed=signed)}, {_num(hi, signed=signed)}]"
 
 
-def markdown(result: dict, *, primary: str, title: str, min_degs: int, n_boot: int, seed: int, frozen=None) -> str:
+def _unchanged_intro(result: dict, unchanged: dict | None, *, min_degs: int, min_unchanged: int) -> str:
+    """What the changed-vs-unchanged report measures, with the thresholds the eval dirs recorded."""
+    metric = result["metrics"][UNCHANGED]
+    recorded = [u for u in (unchanged or {}).values() if u]
+    if recorded:
+        rule = f"not a DEG, |Δ| < {recorded[0]['max_effect']:g}, padj ≥ {recorded[0]['min_padj']:g}"
+    else:
+        rule = "not a DEG, with a small |Δ| and a large padj (evaluate.py --unchanged-max-effect, --unchanged-min-padj)"
+    left_out = list(dict.fromkeys(m for u in recorded for m in u.get("direction_only_excluded", [])))
+    text = (
+        "Does the predicted effect **size** separate the genes that change from the genes that clearly do not? "
+        "(The reports above score the direction, on DEGs only.) "
+    )
+    if metric == "detect_auroc":
+        text += (
+            "Per perturbation, `detect_auroc` is the AUROC of |predicted effect| for its changed genes (the DEGs) "
+            f"against its unchanged genes ({rule}); the genes in between (not significant, but not clearly "
+            "unaffected) are left out. 0.5 = no separation. The table gives the median over the shared panel. "
+        )
+    else:
+        text += f"The table gives the median `{metric}` over the shared panel; unchanged genes: {rule}. "
+    text += (
+        f"Panel rule of this report: >= {min_degs} scored DEGs **and** >= {min_unchanged} unchanged genes (target "
+        "gene excluded) in every version that has the report. The split-half ceiling takes the changed / unchanged "
+        "labels from half A and |Δ| from half B, and needs both counts in its own half."
+    )
+    if left_out:
+        text += (
+            " Not scored here: methods whose output is a direction confidence, not an effect size "
+            f"({', '.join(left_out)})."
+        )
+    return text
+
+
+def _secondary_tables(result: dict, head: dict[str, str], unchanged: dict | None) -> list[str]:
+    """One compact table of the changed-vs-unchanged report's secondary medians per version (shared panel)."""
+    recorded = [u for u in (unchanged or {}).values() if u]
+    tau = f"τ = {recorded[0]['tau']:g}" if recorded else "τ = the truth's min_lfc"
+    lines = [
+        "",
+        f"Secondary medians on the shared panel, per version. A gene is called changed if |predicted effect| > τ "
+        f"({tau}). `three_class_balanced_acc`: mean recall of up-DEGs (predicted > τ), down-DEGs (< −τ) and "
+        "unchanged genes (|.| ≤ τ); `deg_call_rate` / `unchanged_call_rate`: share of DEGs / unchanged genes "
+        "called changed; `deg_hit_rate`: share of DEGs called with the correct sign; `abs_pred_*_median`: median "
+        "|predicted effect| on DEGs / unchanged genes; `detect_auroc_all`: the headline AUROC with every non-DEG "
+        "(unchanged + grey zone) as the negative class. n = perturbations entering (a metric undefined for a "
+        "perturbation skips it). These depend on τ and on the scale of the prediction; the headline does not.",
+    ]
+    for v in result["versions"]:
+        if v not in result["secondary"]:
+            continue
+        lines += ["", f"{head[v]}:", "", "| method | n | " + " | ".join(f"`{c}`" for c in SECONDARY) + " |"]
+        lines.append("|---|---:|" + "---:|" * len(SECONDARY))
+        table = result["secondary"][v]
+        for m in result["order"]:
+            if m in table.index:
+                r = table.loc[m]
+                lines.append(f"| {label(m)} | {_int(r['n'])} | " + " | ".join(_num(r[c]) for c in SECONDARY) + " |")
+    return lines
+
+
+def markdown(
+    result: dict,
+    *,
+    primary: str,
+    title: str,
+    min_degs: int,
+    n_boot: int,
+    seed: int,
+    frozen=None,
+    min_unchanged: int = 20,
+    unchanged: dict | None = None,
+) -> str:
+    """The markdown tables. ``unchanged``: {version: methods.json["unchanged"]} (check_unchanged_settings)."""
     versions, reference = result["versions"], result["reference"]
     head = {v: f"{v} (primary)" if v == primary else v for v in versions}
     lines = [
@@ -357,14 +547,22 @@ def markdown(result: dict, *, primary: str, title: str, min_degs: int, n_boot: i
         f"(> 0: {label(reference)} better) with its bootstrap CI; p = two-sided Wilcoxon signed-rank, raw / Holm "
         "within each column (report × version). n = perturbations entering the median: at most the panel size, "
         "fewer where the metric is undefined (balanced accuracy needs up and down DEGs) and for the split-half "
-        f"ceiling, which also needs >= {min_degs} DEGs in its half. `—` = not scored there.",
+        f"ceiling, which also needs >= {min_degs} DEGs in its half. `—` = not scored there. The third report "
+        f"({REPORT_TITLES[UNCHANGED].lower()}) has its own headline metric and panel rule, stated in its section; "
+        "its statistics are computed the same way.",
         "",
     ]
     for report in REPORTS:
         tab = wide(result["long"], report, versions)
         pan = result["panels"][report]
-        own = ", ".join(f"{v} own {pan['own'][v]}" for v in versions)
-        lines += [f"## {REPORT_TITLES[report]}", "", f"Shared panel: **{pan['shared']}** perturbations ({own}).", ""]
+        own = ", ".join(f"{v} own {pan['own'][v]}" if v in pan["own"] else f"{v}: no report" for v in versions)
+        lines += [f"## {REPORT_TITLES[report]}", ""]
+        if not pan["own"]:  # no version has this report: nothing to tabulate
+            lines += [f"Not available: {REPORT_MISSING}.", ""]
+            continue
+        if report == UNCHANGED:
+            lines += [_unchanged_intro(result, unchanged, min_degs=min_degs, min_unchanged=min_unchanged), ""]
+        lines += [f"Shared panel: **{pan['shared']}** perturbations ({own}).", ""]
         hdr = ["method"]
         for v in versions:
             hdr += [f"{head[v]} n", f"{head[v]} median [95% CI]", "Δ [95% CI]", "p raw / Holm"]
@@ -386,12 +584,17 @@ def markdown(result: dict, *, primary: str, title: str, min_degs: int, n_boot: i
                     p = f"{_p(r[f'{v}_p_raw'])} / {_p(r[f'{v}_p_holm'])}"
                 cells += [_int(r[f"{v}_n"]), med, diff, p]
             lines.append("| " + " | ".join(cells) + " |")
-        lines += [
-            "",
-            f"Own panels: each version's own >= {min_degs}-DEG perturbations, as freeze_results.py would report "
-            "that eval dir alone.",
-            "",
-        ]
+        if report == UNCHANGED:
+            own_rule = (
+                f"Own panels: each version's own perturbations with >= {min_degs} DEGs and >= {min_unchanged} "
+                "unchanged genes."
+            )
+        else:
+            own_rule = (
+                f"Own panels: each version's own >= {min_degs}-DEG perturbations, as freeze_results.py would report "
+                "that eval dir alone."
+            )
+        lines += ["", own_rule, ""]
         hdr = ["method"] + [x for v in versions for x in (f"{head[v]} n", f"{head[v]} median [95% CI]")]
         lines += ["| " + " | ".join(hdr) + " |", "|---" + "|---:|---" * len(versions) + "|"]
         for _, r in tab.iterrows():
@@ -403,13 +606,20 @@ def markdown(result: dict, *, primary: str, title: str, min_degs: int, n_boot: i
                     (_num(r[f"{v}_median_own"]) + _ci(r[f"{v}_ci_low_own"], r[f"{v}_ci_high_own"])) if ok else "—",
                 ]
             lines.append("| " + " | ".join(cells) + " |")
+        if report == UNCHANGED:
+            lines += _secondary_tables(result, head, unchanged)
         extra = []
         for v in versions:
             note = result["notes"][report][v]
-            if note["missing_methods"]:
+            if note["missing_methods"] and not note.get("report_missing"):
                 extra.append(f"- not scored in {v}: {', '.join(label(m) for m in note['missing_methods'])}")
             extra += [f"- {v}: {n}" for n in note["notes"]]
-            if pan["only_in"][v]:
+            if report == UNCHANGED and ((unchanged or {}).get(v) or {}).get("ceiling") is False:
+                extra.append(
+                    f"- {v}: no split-half ceiling, its truth dir has no padj_half_a.parquet (written before "
+                    "ground_truth.py saved half A's padj)"
+                )
+            if pan["only_in"].get(v):
                 extra.append(f"- in the {v} panel only ({len(pan['only_in'][v])}): {', '.join(pan['only_in'][v][:20])}")
         if extra:
             lines += ["", *extra]
@@ -541,8 +751,13 @@ def provenance(
     tables: list[str],
     frozen: dict[str, str] | None,
     git: dict | None = None,
+    min_unchanged: int = 20,
+    unchanged: dict | None = None,
 ) -> dict:
-    """The provenance record. ``git``: a git_state() snapshot taken before any table was written."""
+    """The provenance record. ``git``: a git_state() snapshot taken before any table was written.
+
+    ``unchanged``: {version: methods.json["unchanged"]}, the changed-vs-unchanged settings of each eval dir.
+    """
     inputs = {}
     for d in eval_dirs.values():
         d = pathlib.Path(d)
@@ -572,8 +787,13 @@ def provenance(
         "primary": primary,
         "reference": result["reference"],
         "metric": metric,
+        "metrics": result["metrics"],
         "min_degs": min_degs,
+        "min_unchanged": min_unchanged,
         "panel": "per report: perturbations with >= min_degs scored DEGs (target excluded) in every version",
+        "panel_unchanged": "changed-vs-unchanged report: >= min_degs scored DEGs and >= min_unchanged unchanged "
+        "genes (target excluded) in every version that has the report",
+        "unchanged": unchanged,
         "bootstrap": {"n_boot": n_boot, "seed": seed, "unit": "perturbations", "interval": "percentile, 95%"},
         "test": "two-sided Wilcoxon signed-rank on paired perturbations; Holm within each (report, version) column",
         "difference": "median(reference - method) over the paired perturbations",
@@ -607,6 +827,7 @@ def run_table(args) -> int:
         raise SystemExit(f"--primary {args.primary!r} is not one of the --eval versions {list(eval_dirs)}")
     eval_dirs = {args.primary: eval_dirs[args.primary], **{v: d for v, d in eval_dirs.items() if v != args.primary}}
     check_eval_settings(eval_dirs)
+    unchanged = check_unchanged_settings(eval_dirs)
     evals, manifests = {}, {}
     for v, d in eval_dirs.items():
         evals[v], manifests[v] = read_eval(d)
@@ -615,7 +836,9 @@ def run_table(args) -> int:
         manifests,
         reference=args.reference,
         metric=args.metric,
+        unchanged_metric=args.unchanged_metric,
         min_degs=args.min_degs,
+        min_unchanged=args.min_unchanged,
         n_boot=args.n_boot,
         seed=args.seed,
     )
@@ -634,9 +857,9 @@ def run_table(args) -> int:
     write_csv(result["long"], f"{tag}_side_by_side_long.csv", index=False)
     write_csv(result["panel"], f"{tag}_side_by_side_panel.csv", index=False)
     frozen_paths = _named(args.frozen_summary, "--frozen-summary")
-    unknown = set(frozen_paths) - set(REPORTS)
+    unknown = set(frozen_paths) - set(FROZEN_REPORTS)
     if unknown:
-        raise SystemExit(f"--frozen-summary reports must be among {list(REPORTS)}, got {sorted(unknown)}")
+        raise SystemExit(f"--frozen-summary reports must be among {list(FROZEN_REPORTS)}, got {sorted(unknown)}")
     frozen = compare_frozen(result["long"], frozen_paths, args.primary) if frozen_paths else None
     if frozen is not None:
         write_csv(frozen, f"{tag}_side_by_side_vs_frozen.csv", index=False)
@@ -648,6 +871,8 @@ def run_table(args) -> int:
         n_boot=args.n_boot,
         seed=args.seed,
         frozen=frozen,
+        min_unchanged=args.min_unchanged,
+        unchanged=unchanged,
     )
     (out / f"{tag}_side_by_side.md").write_text(md)
     written.append(f"{tag}_side_by_side.md")
@@ -667,6 +892,8 @@ def run_table(args) -> int:
         tables=[*written, f"{tag}.provenance.json"],
         frozen=frozen_paths,
         git=git,
+        min_unchanged=args.min_unchanged,
+        unchanged=unchanged,
     )
     (out / f"{tag}.provenance.json").write_text(json.dumps(prov, indent=2, default=str))
     print(md)
@@ -748,6 +975,10 @@ def shell_config(cfg) -> str:
         raise ValueError(f"controls reuse pred names {sorted(clash)}")
     versions = [cfg.primary_version, *[v for v in cfg.versions if v != cfg.primary_version]]
     gt, fr, lr, sel, ev, st = cfg.ground_truth, cfg.frozen, cfg.learned, cfg.selection, cfg.evaluate, cfg.stats
+    direction_only = [str(n) for n in ev.direction_only or []]
+    bad = [n for n in direction_only if not NAME.match(n)]
+    if bad:
+        raise ValueError(f"evaluate.direction_only names must match {NAME.pattern}: {bad}")
     values = {
         "PREPARED_DIR": cfg.prepared_dir,
         "REQUIRE_DATA_DONE": bool(cfg.require_data_done),
@@ -787,7 +1018,12 @@ def shell_config(cfg) -> str:
         "MIN_DEGS": ev.min_degs,
         "EPS": ev.eps,
         "EVAL_SEED": ev.seed,
+        "UNCH_MAX_EFFECT": ev.unchanged_max_effect,
+        "UNCH_MIN_PADJ": ev.unchanged_min_padj,
+        "MIN_UNCHANGED": ev.min_unchanged,
+        "DIRECTION_ONLY": " ".join(direction_only),  # space-separated names (NAME has no space)
         "METRIC": st.metric,
+        "UNCH_METRIC": st.unchanged_metric,
         "N_BOOT": st.n_boot,
         "STATS_SEED": st.seed,
     }
@@ -813,8 +1049,15 @@ def main(argv=None) -> int:
     p.add_argument("--eval", action="append", required=True, help="VERSION=EVAL_DIR (evaluate.py --out-dir); repeat")
     p.add_argument("--primary", required=True, help="the primary version (first column group)")
     p.add_argument("--reference", default="scLDM_s0", help="method every other row is paired against")
-    p.add_argument("--metric", default="balanced_acc")
+    p.add_argument("--metric", default="balanced_acc", help="headline of the full and the specific report")
+    p.add_argument("--unchanged-metric", default="detect_auroc", help="headline of the changed-vs-unchanged report")
     p.add_argument("--min-degs", type=int, default=5)
+    p.add_argument(
+        "--min-unchanged",
+        type=int,
+        default=20,
+        help="changed-vs-unchanged report: unchanged genes a perturbation needs (besides --min-degs DEGs)",
+    )
     p.add_argument("--n-boot", type=int, default=stats.DEFAULT_N_BOOT)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--tag", required=True, help="file prefix, e.g. replogle_raw_test312_w2ema_3seeds")

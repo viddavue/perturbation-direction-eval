@@ -8,6 +8,9 @@ Outputs in ``--out-dir``:
   delta_true.parquet   perturbation x gene, mean log1p(CP10k) perturbed - control
   deg.parquet          perturbation x gene, bool (BH padj < alpha and |delta| > min_lfc)
   ceiling.csv          per-perturbation direction metrics of half B vs DEGs selected in half A
+  delta_half_{a,b}.parquet, deg_half_a.parquet, padj_half_a.parquet
+                       the two halves' effects and half A's DEG mask and BH padj (perturbation x gene), from
+                       which evaluate.py builds the ceilings of its derived reports
   conditions.csv       conditions to generate (control first), input to generate.py
   info.json            cell counts, control library size, settings
 """
@@ -230,7 +233,7 @@ def main(argv=None):
         idx = rng.permutation(idx)
         half[idx[: len(idx) // 2]], half[idx[len(idx) // 2 :]] = "A", "B"
     adata.obs["grp"] = adata.obs[args.pert_key].astype(str) + "|" + half
-    d_a, _, deg_a = effects_and_degs(
+    d_a, padj_a, deg_a = effects_and_degs(
         adata, "grp", [f"{p}|A" for p in perts], f"{args.control}|A", args.alpha, args.min_lfc
     )
     means_b = group_means(adata[half == "B"], "grp")
@@ -242,8 +245,9 @@ def main(argv=None):
         )
         rows.append({"perturbation": p, **m})
     pd.DataFrame(rows).set_index("perturbation").to_csv(out / "ceiling.csv")
-    # halves saved so evaluate.py can build ceilings for derived targets (e.g. effect minus generic shift)
-    for name, df in (("delta_half_a", d_a), ("delta_half_b", d_b), ("deg_half_a", deg_a)):
+    # halves saved so evaluate.py can build ceilings for derived targets (e.g. effect minus generic shift);
+    # half A's padj labels the changed / clearly unchanged genes of the changed-vs-unchanged report's ceiling
+    for name, df in (("delta_half_a", d_a), ("delta_half_b", d_b), ("deg_half_a", deg_a), ("padj_half_a", padj_a)):
         df = df.copy()
         df.index = [i.rsplit("|", 1)[0] for i in df.index]
         df.to_parquet(out / f"{name}.parquet")

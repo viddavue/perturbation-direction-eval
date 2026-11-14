@@ -7,7 +7,7 @@ Regenerate with:
 
 ```bash
 python experiments/perturbation_direction/freeze_results.py \
-  --eval-dir outputs/perturbation_direction/replogle/eval_freeze_20261021 \
+  --eval-dir outputs/perturbation_direction/legacy/replogle/eval_freeze_20261021 \
   --tag replogle_hepg2_hvg2000 --results-dir results
 ```
 
@@ -35,6 +35,15 @@ Each tag produces six files:
   paired cohort.
 - **Shuffled and empirical baselines are included deliberately** as controls; a table where the
   shuffled control sits near chance is the evidence that the metric is not trivially satisfiable.
+- **Changed vs unchanged genes is a third report with its own conventions** (`side_by_side.py`
+  only; METHODS.md section g). File `_side_by_side_unchanged.csv`, rows `report == unchanged` in
+  `_side_by_side_long.csv` and `_side_by_side_panel.csv` (which gains `n_unchanged_<version>`
+  columns), a third section in `_side_by_side.md`. Headline: median `detect_auroc`, the AUROC of
+  |predicted Δ| for DEGs vs clearly unchanged genes (not a DEG, |Δ| < 0.05, padj >= 0.5; genes in
+  between are left out). Panel: >= 5 DEGs **and** >= 20 unchanged genes in both versions. MLP and
+  prior are direction-only (P(up) − 0.5, no effect size) and are listed as not scored. Tables
+  generated before this report existed (commit `ab1287d` and earlier, including every table
+  described below) do not have it.
 
 ## Replogle HepG2, earlier STATE-route results (`f885234`)
 

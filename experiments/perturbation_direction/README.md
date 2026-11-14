@@ -11,18 +11,20 @@ verify_merge.py  gates A1-A4 (raw filtered == STATE), A5 (truth == frozen truth)
 prepare_replogle_state.py  legacy: STATE Replogle-Nadig file -> scLDM-style train/test count h5ads
 audit.py         fail-fast checks: counts layer, gene/label vocab, split structure, size factors, EMA
 ground_truth.py  real Δ (perturbed − control, mean log1p CP10k), Wilcoxon DEGs, split-half noise ceiling
+                 (and the two halves' effects, half A's DEGs and padj, for the ceilings of derived reports)
 generate.py      scLDM profiles per condition with paired noise (same z for every condition)
 baselines.py     transfer (mean over the other lines), generic shift and kNN transfer
 transfer_models.py  kNN cross-context predictor (fit on target-context TRAIN perturbations only)
 learned_baselines.py  trained direction classifiers ported from perturbational_effect_pw (prior and MLP)
 direction_models.py   their models + SVD gene/perturbation embeddings
-evaluate.py      per-perturbation metrics, summary table, specificity (shuffled) control, plots
-metrics.py       pure metric functions (tested in tests/test_direction_metrics.py)
+evaluate.py      per-perturbation metrics, summary table, specificity (shuffled) control, plots; three reports:
+                 direction of the full effect, of the perturbation-specific part, and changed vs unchanged genes
+metrics.py       pure metric functions (tested in tests/test_direction_metrics.py, test_direction_unchanged.py)
 subset_truth.py  restrict a truth dir to the val or test side of a split
 select_sweep.py  guidance/EMA choice from the validation perturbations only
 stats.py         bootstrap CIs over perturbations, paired Wilcoxon tests, Holm
 freeze_results.py  one evaluate.py dir -> the commit-able results/ tables (CIs, paired tests, provenance)
-side_by_side.py  the raw rebuild's main table: filtered | all, shared panel, paired tests, provenance
+side_by_side.py  the raw rebuild's main table: filtered | all per report, shared panel, paired tests, provenance
 run_replogle_raw_data.sh  data stage: checksums -> audit -> prepare (filtered + all) -> gates A1-A4
 run_replogle_raw_eval.sh  evaluation stage: truth per version -> A5 + validation check -> baselines ->
                           evaluate.py per version -> side_by_side.py
@@ -44,16 +46,18 @@ with the same three scLDM seeds (w2 + EMA). `filtered` is primary.
   validation check, the guidance sweep rescored on the `filtered` 60 validation perturbations still picks the
   frozen config (`w2_ema`). The guidance config is chosen once and never re-chosen per version.
 - **Rows:** scLDM seeds 0-2 (seed 0 is the reference), kNN, MLP, generic, transfer, prior, the shuffled
-  controls and the split-half ceiling. **Columns:** `filtered (primary)` | `all`, for the full effect and the
-  perturbation-specific report.
+  controls and the split-half ceiling. **Columns:** `filtered (primary)` | `all`, for the full effect, the
+  perturbation-specific report and the changed-vs-unchanged report (where MLP and prior are not scored).
 - **Shared panel:** medians, bootstrap CIs and the paired tests use the perturbations with >= 5 DEGs (target
   excluded) in **both** versions, so a difference between the columns is not a difference in panels. Each
-  column's own-panel n and median are listed too.
+  column's own-panel n and median are listed too. The changed-vs-unchanged report also requires >= 20
+  unchanged genes, in both versions.
 - **Statistics** (`stats.py`, as in the frozen tables): median balanced accuracy, 95% percentile bootstrap CI
   over perturbations (2,000 resamples), two-sided Wilcoxon signed-rank vs scLDM seed 0 with the CI of the
-  paired median difference, Holm within each (report, version) column, raw p alongside.
-- **Outputs:** `results/replogle_raw_test312_w2ema_3seeds_side_by_side.{md,csv}` (+ `_specific`, `_long`,
-  `_panel`, `_vs_frozen`) and `<tag>.provenance.json` (commit + dirty flag, sha256 of every input including
+  paired median difference, Holm within each (report, version) column, raw p alongside. The
+  changed-vs-unchanged report uses the same statistics on its own headline, the median `detect_auroc`.
+- **Outputs:** `results/replogle_raw_test312_w2ema_3seeds_side_by_side.{md,csv}` (+ `_specific`, `_unchanged`,
+  `_long`, `_panel`, `_vs_frozen`) and `<tag>.provenance.json` (commit + dirty flag, sha256 of every input including
   the prediction files and the prepared files' `manifest.json`, the resolved config, the run's start time).
 - `_vs_frozen.csv` compares the `filtered` own panel with the frozen STATE-based table: equal for every method
   whose inputs did not change (the MLP is now seeded, so it can differ).
@@ -99,9 +103,25 @@ streamlit run experiments/perturbation_direction/dashboard.py -- --root outputs/
 - **The decoder's expected expression, not NB samples, is the main readout.** For the NB head that is
   softmax(logits) × 1e4, which needs no library-size model and no sampling noise. `--library-size`
   additionally stores an NB-sampled variant (`*_sample.parquet`), normalized the same way as real data.
-- **Only DEGs are scored.** A DEG has BH-adjusted Wilcoxon p < 0.05 and |Δ| > 0.1. On unchanged genes
-  the sign is a coin flip. The CRISPRi target gene is excluded (`--exclude-target`), and the fraction of
-  perturbations whose target is predicted down is reported separately as a sanity check.
+- **The direction is scored on DEGs only.** A DEG has BH-adjusted Wilcoxon p < 0.05 and |Δ| > 0.1. On
+  unchanged genes the sign is a coin flip. The CRISPRi target gene is excluded (`--exclude-target`), and the
+  fraction of perturbations whose target is predicted down is reported separately as a sanity check.
+- **Unchanged genes are scored in a report of their own.** Scoring DEGs only never penalises a method for
+  predicting changes in genes that do not change. The third report, changed vs unchanged genes
+  (`summary_unchanged.csv`, `per_perturbation_unchanged/`), asks whether the predicted effect size separates
+  the two ([METHODS.md](METHODS.md) section g).
+  - **Unchanged** = not a DEG, |Δ| < 0.05 and padj >= 0.5. Genes in between (not significant, but not
+    clearly unaffected) form a grey zone and are left out of the headline.
+  - **Headline: `detect_auroc`**, the AUROC of |predicted Δ| for DEGs against unchanged genes, per
+    perturbation; 0.5 is no separation. It is rank-based, so it does not depend on how a method scales its
+    effects. The thresholded numbers (call rates at |predicted Δ| > 0.1, a three-class balanced accuracy)
+    are secondary: they mix ranking with calibration.
+  - **Panel:** >= 5 DEGs and >= 20 unchanged genes (`--min-unchanged`).
+  - **Not scored:** methods declared `--direction-only` (MLP and prior output P(up) − 0.5, a direction
+    confidence, not an effect size).
+  - Written whenever the truth dir has `padj.parquet` (`--no-unchanged-report` switches it off). Its
+    split-half ceiling needs `padj_half_a.parquet`, which `ground_truth.py` now saves; with an older
+    truth dir the report is written without a ceiling.
 - **Headline metric: balanced sign accuracy**, the mean of the recall on up-DEGs and on down-DEGs. It
   stays at 0.5 for a constant "everything up" prediction even when up-DEGs are the majority. Also
   reported: plain sign accuracy, top-20 accuracy, AUROC, and Spearman correlation on DEGs.
@@ -188,6 +208,11 @@ python $E/evaluate.py --truth-dir $O/truth --exclude-target \
              knn=$O/baselines/delta_knn.parquet \
   --specific-ref $O/baselines/delta_generic.parquet --out-dir $O/eval
 ```
+
+`evaluate.py` writes `summary.csv`, `summary_specific.csv` (with `--specific-ref`) and `summary_unchanged.csv`
+(the truth dir has `padj.parquet`), each with its `per_perturbation*/<method>.csv` tables; `by_strength*.csv`
+and the plots belong to the two direction reports. When `mlp` or `prior` are among the baselines, add
+`--direction-only mlp prior`.
 
 ## Dentate gyrus smoke test (laptop CPU, batch size 16)
 

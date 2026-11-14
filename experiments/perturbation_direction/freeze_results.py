@@ -5,7 +5,7 @@ records the provenance needed to know which code and inputs produced them.
 
 Example:
     python experiments/perturbation_direction/freeze_results.py \
-        --eval-dir outputs/perturbation_direction/replogle/eval_freeze_20261021 \
+        --eval-dir outputs/perturbation_direction/legacy/replogle/eval_freeze_20261021 \
         --tag replogle_hepgl_hvg2000 \
         --results-dir results
 """

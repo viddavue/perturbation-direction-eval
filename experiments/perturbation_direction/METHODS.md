@@ -159,6 +159,10 @@ Five baselines plus two references:
 Each version (filtered, all) refits its baselines on its own train file. This is the final baseline
 set; calibrated (ridge), bilinear, GBDT, and per-donor-line transfer baselines have been removed.
 
+MLP and prior output P(up) − 0.5, a direction confidence, not an effect size. They are scored in the
+two direction reports and left out of the changed-vs-unchanged report (section g), which ranks genes by
+the predicted effect size.
+
 ## (e) Validation protocol
 
 The 372 HepG2 test perturbations are split into **60 validation** and **312 test**
@@ -180,7 +184,9 @@ never on validation or test perturbations. Test perturbations are never used for
 
 **DEGs.** A gene is a differentially expressed gene (DEG) for a perturbation if the BH-adjusted
 Wilcoxon p < 0.05 **and** |Δ| > 0.1 (Δ = mean perturbed − mean control, log1p CP10k). On unchanged
-genes the sign is a coin flip.
+genes the sign is a coin flip, so the two direction reports (full effect, perturbation-specific) score
+DEGs only. A method is therefore never penalised there for predicting a change in a gene that does not
+change; the third report (section g) asks that question.
 
 **Balanced sign accuracy.** The mean of recall on up-DEGs and recall on down-DEGs. It stays at 0.5
 for a constant "everything up" prediction regardless of class imbalance. Reported as the median over
@@ -204,7 +210,8 @@ from the medians.
 **Shared panel.** The main table's medians, CIs and paired tests are computed on the perturbations
 with ≥ 5 DEGs (target excluded) in **both** the filtered and the all version, per report. This
 keeps the columns comparable on the same perturbations. Each version's own-panel n and median are
-listed beside it.
+listed beside it. The changed-vs-unchanged report additionally requires ≥ 20 unchanged genes
+(section g).
 
 **Bootstrap CI.** 95% percentile bootstrap over perturbations (2,000 resamples, seed 0). The unit of
 uncertainty is the perturbation, not the gene or the cell.
@@ -213,6 +220,100 @@ uncertainty is the perturbation, not the gene or the cell.
 shared panel. The bootstrap CI of the paired median difference `reference − method` (> 0: reference
 is better) is reported. Raw and Holm-corrected p-values are both shown; Holm correction is applied
 within each (report, version) column.
+
+## (g) Changed vs unchanged genes (third report)
+
+The direction reports score DEGs only. The third report asks the complementary question: **does the
+predicted effect size separate the genes that change from the genes that clearly do not?** A model
+that predicts sizeable changes everywhere can have a perfect direction score; here it cannot.
+
+**Gene classes.** Per knockdown, over the scored genes (the CRISPRi target excluded, as in the
+direction reports):
+
+| class | definition |
+|---|---|
+| changed | the DEGs of the direction reports: padj < 0.05 and \|Δ\| > 0.1 (and Δ ≠ 0) |
+| unchanged | not a DEG, \|Δ\| < 0.05 (`--unchanged-max-effect`) and padj ≥ 0.5 (`--unchanged-min-padj`); a gene with a NaN padj is never unchanged |
+| grey zone | everything else: not significant, but not clearly unaffected |
+
+**Why a grey zone.** "Not significant" is not "unaffected". With a few dozen to a few hundred cells
+per knockdown the test misses real but small effects, so the complement of the DEG set mixes
+unaffected genes with under-powered ones. Calling all of them negatives would penalise a method for
+predicting an effect that is real but was not detected. The unchanged class therefore needs
+positive evidence of no change on both axes (a small effect and a large padj), and the genes in
+between are left out of the headline. The thresholds are settings, not estimates: they are recorded
+in each eval dir's `methods.json` and must agree across the versions of a table.
+
+**Headline: `detect_auroc`.** Per knockdown, the AUROC of the score |Δ_pred| for changed (positive)
+against unchanged (negative) genes: the probability that a random changed gene gets a larger
+predicted effect than a random unchanged gene, ties counting one half. 0.5 is no separation; a
+constant prediction scores exactly 0.5; it is undefined (NaN) when a knockdown has no changed or no
+unchanged gene. It is rank-based on purpose: it needs no threshold on the prediction and does not
+depend on the prediction's scale, so a method that systematically under- or over-estimates effect
+sizes (an average over neighbours or over cell lines shrinks them, for example) is compared on what
+it ranks, not on how it is calibrated. The summary is the median (and IQR) over knockdowns.
+
+**Secondary numbers** (all per knockdown, medians in the tables):
+
+| column | meaning |
+|---|---|
+| `detect_auroc_all` | the same AUROC with every other scored gene (unchanged + grey zone) as negatives; a sensitivity check that uses no threshold beyond the DEG call |
+| `abs_pred_deg_median`, `abs_pred_unchanged_median` | median \|Δ_pred\| on the changed / unchanged genes |
+| `deg_call_rate`, `unchanged_call_rate` | share of changed / unchanged genes called changed, \|Δ_pred\| > τ |
+| `deg_hit_rate` | share of changed genes called changed with the correct sign |
+| `three_class_balanced_acc` | mean of three recalls: up-DEGs predicted > τ, down-DEGs predicted < −τ, unchanged genes predicted \|·\| ≤ τ; NaN unless all three classes are non-empty |
+| `n_deg`, `n_unchanged`, `n_grey` | genes per class (properties of the truth) |
+
+τ is the truth's own effect threshold (`min_lfc`, 0.1); |Δ_pred| = τ exactly is not a call. These
+numbers are secondary because they apply a threshold calibrated on the observed effects to
+predictions that live on a different scale: a method that shrinks every effect by a constant factor
+keeps its ranking (and its `detect_auroc`) but loses calls. They describe that calibration; they do
+not rank methods. A gene without a prediction (NaN) has no score and is left out of the metrics, not
+of the counts.
+
+**Panel.** A knockdown is scored with ≥ 5 DEGs (the direction reports' rule, same count) **and** ≥ 20
+unchanged genes (`--min-unchanged`), both with the target excluded. `side_by_side.py` applies the
+same rule to build the shared panel of this report (both counts in both versions).
+
+**Methods.** Every prediction with its shuffled control (the same derangement as in the full report)
+and every baseline, except the methods declared direction-only (`evaluate.py --direction-only mlp
+prior`): `learned_baselines.py` writes P(up) − 0.5, whose absolute value is a confidence about the
+sign, not a predicted effect size, so ranking genes by it answers a different question. They stay in
+the table as "not scored", like `generic` in the perturbation-specific report.
+
+**Split-half ceiling.** On independent cells: the changed / unchanged labels and the signs come
+from half A (its DEG mask, its Δ and its padj, `deg_half_a`, `delta_half_a`, `padj_half_a`), the score
+is |Δ| of half B. Its summary row uses the panel of the full data, like the other ceilings; in
+`side_by_side.py` it additionally needs both gene counts in its own half. `ground_truth.py` saves
+`padj_half_a.parquet` for this; a truth dir written before that has no such file, and the report is
+then written without a ceiling (with a message).
+
+**Statistics.** As for the other reports: median over the shared panel, 95% percentile bootstrap CI,
+paired Wilcoxon signed-rank of scLDM seed 0 against every other row with the CI of the paired median
+difference, Holm within each (report, version) column, own-panel numbers beside it. The headline
+metric of this report is `--unchanged-metric` (default `detect_auroc`); `--metric` applies to the
+two direction reports.
+
+**Caveats.**
+
+- *Not significant is not unaffected.* This is why the unchanged class is defined positively and
+  the grey zone is excluded from the headline; `detect_auroc_all` shows what happens without that
+  choice.
+- *Part of the score is not knockdown-specific.* Low-expressed genes are over-represented among the
+  unchanged genes (a small log-scale effect and a large padj are easier to obtain there), and some
+  genes respond to almost any knockdown. Knowing which genes are responsive at all therefore
+  separates changed from unchanged genes without knowing the knockdown. The `generic` row (the same
+  shared response for every knockdown) and the shuffled rows (another knockdown's prediction)
+  measure exactly that share; what a method adds is its margin over them.
+- *The split-half ceiling is a noise reference, not an upper bound.* Each half has half the cells,
+  so |Δ| of half B carries more sampling noise than the full-data effect. The thresholded ceiling
+  numbers are pessimistic for that reason: unchanged genes cross τ by chance more often, and half A
+  labels fewer DEGs. The rank-based headline is affected too, because a noisy half is ranked
+  against labels from another noisy half: a method whose predictions are smoother than a
+  half-size sample can reach or exceed the ceiling without being "better than the data". Read it as
+  what the real effect of half the cells achieves, not as the best achievable score.
+- *The thresholds are choices.* Other values of the effect and padj bounds move genes between the
+  unchanged class and the grey zone; the DEG set does not move.
 
 ## Appendix: Cell-level VCC diagnostics
 

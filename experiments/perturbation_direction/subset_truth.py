@@ -4,8 +4,8 @@ The validation split makes the 312 test perturbations the primary cohort and the
 superset sensitivity check. `evaluate.py` takes a truth *directory*, so restricting the cohort
 means writing one — this does that without touching the original.
 
-Outputs mirror the input (delta_true, deg, padj if present, ceiling.csv, info.json) with rows
-restricted to the requested perturbations, and record which split produced them.
+Outputs mirror the input (delta_true, deg, padj and the split-half files if present, ceiling.csv,
+info.json) with rows restricted to the requested perturbations, and record which split produced them.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from pathlib import Path
 import pandas as pd
 
 ROW_FILES = ("delta_true.parquet", "deg.parquet", "padj.parquet", "delta_half_a.parquet",
-             "delta_half_b.parquet", "deg_half_a.parquet")
+             "delta_half_b.parquet", "deg_half_a.parquet", "padj_half_a.parquet")
 
 
 def main(argv=None) -> int:

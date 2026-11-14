@@ -163,12 +163,20 @@ python $E/verify_merge.py identity --config experiments/configs/perturbation_dir
 `experiments/configs/perturbation_direction/replogle_raw_eval.yaml` (prepared/out/results dirs, versions,
 ground-truth and baseline settings, the frozen truth and selection, the prediction files); any key can be
 overridden as `key=value`. As in the data runner: one log per step in `<out_dir>/logs/`, the run stops at
-the first failing step, and ends with `<out_dir>/DONE_raw_eval`. Resume is simpler than the data runner's
-per-step hashes: a step with a `.done` marker is skipped, and `<out_dir>/logs/inputs.sha256` pins what the
-stage reads from outside `out_dir` (resolved config, prepared `manifest.json` and h5ad size/mtime, metadata,
-split, frozen truth/selection/summaries, every prediction file). When a rerun finds any of it changed, for
-example after the data stage was rerun, it prints the difference and reruns every step. Code changes are
-not detected: use `FORCE=1`.
+the first failing step, and ends with `<out_dir>/DONE_raw_eval`. Resume uses the data runner's per-step
+hashes (`step_hash.py`; see the runner's header): a step is skipped while the hash in its `.done` marker
+matches the resolved config, its command line, its script and the pipeline modules it imports, its input
+files and the upstream markers. `<out_dir>/logs/inputs.sha256` also pins what the stage reads from outside
+`out_dir` (resolved config, prepared `manifest.json` and h5ad size/mtime, metadata, split, frozen
+truth/selection/summaries, every prediction file). When a rerun finds any of it changed, for example after
+the data stage was rerun, it prints the difference and reruns every step. `FORCE=1` reruns all.
+
+**After the update that added the changed-vs-unchanged report**, an existing `out_dir` reruns from the
+first step: the config has new keys (`evaluate.unchanged_*`, `min_unchanged`, `direction_only`,
+`stats.unchanged_metric`), so the inputs stamp and every step hash differ. That is intended: the truth has
+to be rebuilt anyway, because `ground_truth.py` now also writes `padj_half_a.parquet` (half A's BH padj;
+every other truth file comes out byte-identical), which `subset_truth.py` carries into `truth_<v>_test`
+and the report's split-half ceiling needs.
 
 ```bash
 # prerequisites on student03: the data stage finished (DONE_raw_data), and the frozen selection table, which
@@ -191,22 +199,29 @@ Per version `v` (primary first), with `P` = `prepared_dir` and `O` = `out_dir` (
 | `stage_sweep`, `select_sweep`, `select_check` | the six sweep files rescored on `O/truth_filtered_val` by `select_sweep.py`; `side_by_side.py check-selection` requires the frozen choice (`w2_ema`) and records the table vs the frozen `selection.json` | **yes** |
 | `tierb_<v>`, `tierb_test_<v>` | `verify_merge.py compare`: filtered vs all (per-perturbation correlation, slope, DEG Jaccard, panel sizes) | report |
 | `baselines_<v>`, `learned_<v>` | `baselines.py` (generic, transfer, kNN) and `learned_baselines.py` (prior, MLP; seeded), refitted on `P/replogle_train_raw_<v>.h5ad` | |
-| `eval_<v>` | `evaluate.py` on `O/truth_<v>_test`: `scLDM_s0..2` + knn, mlp, generic, transfer, prior; `--exclude-target`, `--specific-ref O/baselines_<v>/delta_generic.parquet` | |
+| `eval_<v>` | `evaluate.py` on `O/truth_<v>_test`: `scLDM_s0..2` + knn, mlp, generic, transfer, prior; `--exclude-target`, `--specific-ref O/baselines_<v>/delta_generic.parquet`; three reports (`summary.csv`, `summary_specific.csv`, `summary_unchanged.csv` + `per_perturbation*/`), the third with `--unchanged-max-effect`, `--unchanged-min-padj`, `--min-unchanged` and `--direction-only mlp prior` from the config | |
 | `controls_<v>` | optional: `scLDM_s0` + the generation controls (`cells128`, `w1`, `w0`; missing files are skipped) -> `O/eval_controls_<v>` | |
 | `side_by_side[_controls]` | `side_by_side.py table` -> `results/replogle_raw_test312_w2ema_3seeds[_controls]_*` | |
 
 The sweep files are linked one by one into `O/selection/sweep/`: the generation dir also holds
 `*_sample.parquet` files, which `select_sweep.py` would score as extra configs if pointed at that directory.
 
-**The side-by-side table** (`results/<tag>_side_by_side.md`, `.csv`, `_specific.csv`, `_long.csv`,
-`_panel.csv`, `_vs_frozen.csv`, `<tag>.provenance.json`):
+**The side-by-side table** (`results/<tag>_side_by_side.md`, `.csv`, `_specific.csv`, `_unchanged.csv`,
+`_long.csv`, `_panel.csv`, `_vs_frozen.csv`, `<tag>.provenance.json`):
 
 - Rows: scLDM seeds 0-2, kNN, MLP, generic, transfer, prior, the three shuffled controls, the split-half
-  ceiling. Column groups: `filtered (primary)` | `all`, for the full effect and for the perturbation-specific
-  component.
+  ceiling. Column groups: `filtered (primary)` | `all`, for the full effect, for the perturbation-specific
+  component and for changed vs unchanged genes.
 - Medians, 95% percentile bootstrap CIs (2,000 resamples over perturbations) and paired tests are computed on
   the **shared panel**: perturbations with >= 5 DEGs (target excluded) in **both** versions, per report.
   Each version's own panel (n and median, what `freeze_results.py` would report) is listed beside it.
+- **Changed vs unchanged genes** (METHODS.md section g): headline `detect_auroc` (`stats.unchanged_metric`;
+  `stats.metric` applies to the two direction reports), panel = >= 5 DEGs **and** >= 20 unchanged genes
+  (`evaluate.min_unchanged`) in both versions, the same statistics. MLP and prior are listed as not scored
+  (direction-only). The `.md` adds one table of secondary medians per version (three-class balanced
+  accuracy, call and hit rates, median |predicted Δ| per class, `detect_auroc_all`); `_panel.csv` gets
+  `n_unchanged_<version>` columns. An eval dir without the report (written before it existed) is marked
+  missing for that version instead of failing. `_vs_frozen.csv` stays full | specific.
 - Paired: two-sided Wilcoxon signed-rank vs `scLDM_s0` with the bootstrap CI of the median difference
   (`scLDM_s0 − method`); raw and Holm p, Holm within each (report, version) column. Statistics are `stats.py`'s.
 - `_vs_frozen.csv`: the filtered own panel against the frozen STATE-based tables. With A5 passed it should
@@ -248,7 +263,7 @@ for V in filtered all; do
            scLDM_s2=$G/pred/test312_w2_ema_seed2.parquet \
     --baseline knn=$B/delta_knn.parquet mlp=$L/delta_mlp.parquet generic=$B/delta_generic.parquet \
                transfer=$B/delta_transfer.parquet prior=$L/delta_prior.parquet \
-    --specific-ref $B/delta_generic.parquet --out-dir $O/eval_$V
+    --specific-ref $B/delta_generic.parquet --direction-only mlp prior --out-dir $O/eval_$V
 done
 python $E/side_by_side.py table --eval filtered=$O/eval_filtered --eval all=$O/eval_all --primary filtered \
   --tag replogle_raw_test312_w2ema_3seeds --out-dir results --timestamp "$(date -u +%FT%TZ)" \
@@ -315,7 +330,7 @@ python $E/evaluate.py --truth-dir $O/truth_test312 --exclude-target \
   --baseline knn=$O/baselines/delta_knn.parquet mlp=$O/learned/delta_mlp.parquet \
              generic=$O/baselines/delta_generic.parquet transfer=$O/baselines/delta_transfer.parquet \
              prior=$O/learned/delta_prior.parquet \
-  --specific-ref $O/baselines/delta_generic.parquet --out-dir $O/eval_test312
+  --specific-ref $O/baselines/delta_generic.parquet --direction-only mlp prior --out-dir $O/eval_test312
 python $E/freeze_results.py --eval-dir $O/eval_test312 --tag replogle_test312_w2ema_3seeds --reference scLDM_s0
 ```
 
@@ -324,9 +339,14 @@ cells, and 86 of them have fewer than 40, so the default of 20 would drop those 
 kept. The frozen tables also contain calibrated, bilinear and GBDT rows and an unseeded MLP: those
 baselines were removed afterwards, so a rerun of this route reproduces every other row but not those.
 
-`evaluate.py` writes two reports:
+`evaluate.py` writes three reports, each with per-perturbation tables in `per_perturbation*/`:
 - `summary.csv` scores the direction of the full effect.
 - `summary_specific.csv` scores the direction of the perturbation-specific part: the effect with the
   shared HepG2 response projected out, scaled per perturbation. It tells you whether a model gets more
   right than the shared response. Its `shared_strength_corr` column says how well a model predicts how
   strongly each perturbation triggers that shared response.
+- `summary_unchanged.csv` (changed vs unchanged genes; written when the truth dir has `padj.parquet`) asks
+  whether the predicted effect size separates the DEGs from the genes that clearly do not change:
+  `detect_auroc` and the secondary numbers of METHODS.md section g. `--direction-only mlp prior` keeps the
+  two P(up) − 0.5 baselines out of it. The frozen tables were made before this report existed, and
+  `freeze_results.py` does not tabulate it.

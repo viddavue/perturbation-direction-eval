@@ -6,6 +6,10 @@ Unit tests use synthetic evaluate.py output dirs (per-perturbation CSVs + method
   all       P00 has 8 DEGs (in), P01 has 2 (out), P02 absent -> own panel P00, P03..P29 (28)
   shared    P03..P29 (27)
 
+These synthetic dirs hold the two direction reports only, as an eval dir written before evaluate.py had the
+changed-vs-unchanged report does: that report is then missing for every version, and nothing else changes.
+tests/test_direction_unchanged.py covers the third report itself.
+
 The end-to-end test runs run_replogle_raw_eval.sh on tiny synthetic prepared files (3 lines, 40 genes, 8 test
 perturbations) with fast settings. The resume test runs the same pipeline once more, from a copy of the pipeline
 directory, so that it can edit a step's script.
@@ -37,6 +41,7 @@ RUNNER = REPO / "experiments" / "perturbation_direction" / "run_replogle_raw_eva
 EVAL_CONFIG = REPO / "experiments" / "configs" / "perturbation_direction" / "replogle_raw_eval.yaml"
 PERTS = [f"P{i:02d}" for i in range(30)]
 N_BOOT = 200
+DIRECTION_REPORTS = ("full", "specific")  # what method_frames() builds; "unchanged" is tested in its own file
 
 
 # ---------------------------------------------------------------------------
@@ -83,8 +88,13 @@ def method_frames(version: str, seed: int = 0, drop: tuple[str, ...] = ()) -> di
 
 
 def write_eval(d: Path, frames: dict[str, dict[str, pd.DataFrame]], files: Path | None = None) -> Path:
-    """An evaluate.py output dir: per_perturbation[_specific]/<stem>.csv, summary csvs, methods.json."""
+    """An evaluate.py output dir: per_perturbation[_specific|_unchanged]/<stem>.csv, summary csvs, methods.json.
+
+    Only the reports in ``frames`` are written (the changed-vs-unchanged report is optional in an eval dir).
+    """
     for report, suffix in sbs.REPORTS.items():
+        if report not in frames:
+            continue
         (d / f"per_perturbation{suffix}").mkdir(parents=True, exist_ok=True)
         for stem, f in frames[report].items():
             f.to_csv(d / f"per_perturbation{suffix}" / f"{stem}.csv")
@@ -99,7 +109,7 @@ def write_eval(d: Path, frames: dict[str, dict[str, pd.DataFrame]], files: Path 
         p.write_bytes(f"{d.name}-{name}".encode())
         return {"path": str(p), "abs_path": str(p.resolve())}
 
-    stems = set(frames["full"]) | set(frames["specific"])
+    stems = set().union(*(set(f) for f in frames.values()))
     methods = []
     for name in ("scLDM_s0", "scLDM_s1"):
         if name in stems:
@@ -142,9 +152,11 @@ SHARED = set(PERTS[3:])
 def test_shared_panel_and_own_panels():
     evals = {"filtered": method_frames("filtered"), "all": method_frames("all")}
     res = build(evals)
-    for report in sbs.REPORTS:
+    assert set(res["panels"]) == set(sbs.REPORTS) == {*DIRECTION_REPORTS, "unchanged"}
+    for report in DIRECTION_REPORTS:
         pan = res["panels"][report]
         assert pan["shared"] == 27 and pan["own"] == {"filtered": 29, "all": 28}
+        assert pan["versions_without_report"] == []
         assert pan["only_in"] == {"filtered": ["P01", "P02"], "all": ["P00"]}
         assert pan["absent_from"] == {"filtered": [], "all": ["P02"]}
         for v in ("filtered", "all"):
@@ -164,7 +176,7 @@ def test_shared_panel_and_own_panels():
 def test_ci_and_paired_tests_reuse_stats_on_the_shared_panel():
     evals = {"filtered": method_frames("filtered"), "all": method_frames("all")}
     res = build(evals)
-    for report in sbs.REPORTS:
+    for report in DIRECTION_REPORTS:
         for v in ("filtered", "all"):
             frames = evals[v][report]
             s0 = frames["scLDM_s0"]["balanced_acc"].loc[sorted(SHARED)]
@@ -183,7 +195,7 @@ def test_holm_is_applied_within_each_report_and_version_column():
     evals = {"filtered": method_frames("filtered"), "all": method_frames("all")}
     res = build(evals)
     long = res["long"]
-    for _, col in long[~long.reference].groupby(["report", "version"]):
+    for _, col in long[~long.reference & long.report.isin(DIRECTION_REPORTS)].groupby(["report", "version"]):
         col = col.dropna(subset=["p_raw"])
         assert len(col) >= 4
         np.testing.assert_allclose(col.p_holm.to_numpy(), stats.holm(col.p_raw).to_numpy())
@@ -214,7 +226,7 @@ def test_ceiling_is_restricted_to_the_panel_and_its_own_degs():
 def test_a_method_missing_from_one_version_is_reported_not_dropped():
     evals = {"filtered": method_frames("filtered"), "all": method_frames("all", drop=("mlp",))}
     res = build(evals)
-    for report in sbs.REPORTS:
+    for report in DIRECTION_REPORTS:
         assert cell(res, report, "all", "mlp", "status") == "missing"
         assert np.isnan(cell(res, report, "all", "mlp", "median"))
         assert cell(res, report, "filtered", "mlp", "status") == "ok"
@@ -329,6 +341,7 @@ def test_table_cli_writes_tables_markdown_and_provenance(tmp_path):
     assert names == {
         "t_side_by_side.csv",
         "t_side_by_side_specific.csv",
+        "t_side_by_side_unchanged.csv",
         "t_side_by_side_long.csv",
         "t_side_by_side_panel.csv",
         "t_side_by_side_vs_frozen.csv",
@@ -450,12 +463,17 @@ def test_config_dump_of_the_shipped_config(capsys):
     assert values["CFG_REQUIRE_DATA_DONE"] == "1" and values["CFG_GT_MIN_CELLS"] == "15"
     assert values["CFG_REFERENCE"] == "scLDM_s0" and values["CFG_SEL_EXPECTED"] == "w2_ema"
     assert values["CFG_A5_TOL"] == "1e-09" and values["CFG_L_DEVICE"] == "auto"
+    assert values["CFG_UNCH_MAX_EFFECT"] == "0.05" and values["CFG_UNCH_MIN_PADJ"] == "0.5"
+    assert values["CFG_MIN_UNCHANGED"] == "20" and values["CFG_DIRECTION_ONLY"] == "mlp prior"
+    assert values["CFG_METRIC"] == "balanced_acc" and values["CFG_UNCH_METRIC"] == "detect_auroc"
     assert named["PRED"] == {f"scLDM_s{k}": f"/gen/pred/test312_w2_ema_seed{k}.parquet" for k in range(3)}
     assert set(named["SWEEP"]) == {"w1", "w1_ema", "w2", "w2_ema", "w4", "w4_ema"}
     assert named["SWEEP"]["w2_ema"] == "/gen/sweep/w2_ema.parquet" and len(named["CONTROL"]) == 3
     assert sbs.main(["config", "--config", str(EVAL_CONFIG), "controls=null", "primary_version=all"]) == 0
     values, named = parse_shell(capsys.readouterr().out)
     assert named["CONTROL"] == {} and values["CFG_VERSIONS"] == "all filtered"
+    assert sbs.main(["config", "--config", str(EVAL_CONFIG), "evaluate.direction_only=[]"]) == 0
+    assert parse_shell(capsys.readouterr().out)[0]["CFG_DIRECTION_ONLY"] == ""  # nothing is left out
 
 
 @pytest.mark.parametrize(
@@ -464,6 +482,7 @@ def test_config_dump_of_the_shipped_config(capsys):
         ("reference=scLDM_s9", "reference"),
         ("selection.expected=w8", "selection.expected"),
         ("versions=[raw]", "unknown"),
+        ("evaluate.direction_only=[a b]", "direction_only"),
     ],
 )
 def test_config_dump_validates(override, message):
@@ -632,6 +651,8 @@ def eval_inputs(tmp_path_factory):
     cfg.frozen.summary_specific = None
     cfg.selection.frozen_json = str(d / "frozen" / "selection.json")
     cfg.learned.update({"embedding_dim": 8, "epochs": 1, "batch_size": 512, "device": "cpu"})
+    # 40 genes and 30 cells per perturbation: few genes are clearly unchanged at the shipped thresholds
+    cfg.evaluate.update({"unchanged_max_effect": 0.2, "unchanged_min_padj": 0.2, "min_unchanged": 3})
     cfg.stats.n_boot = N_BOOT
     OmegaConf.save(cfg, d / "eval.yaml")
     return d
@@ -710,6 +731,23 @@ def test_runner_end_to_end_resumes_and_stops_at_a5(eval_inputs):
         assert methods["exclude_target"] and methods["specific_ref"]["path"].endswith(
             f"baselines_{v}/delta_generic.parquet"
         )
+        # the third report: the config's thresholds reach evaluate.py, mlp and prior (direction-only) are left
+        # out, and its split-half ceiling exists because the truth (and its test subset) now carry half A's padj
+        assert (out / f"truth_{v}" / "padj_half_a.parquet").exists()
+        assert set(pd.read_parquet(out / f"truth_{v}_test" / "padj_half_a.parquet").index) == set(TEST)
+        unchanged = {p.stem for p in (out / f"eval_{v}" / "per_perturbation_unchanged").glob("*.csv")}
+        assert unchanged == per - {"mlp", "prior"}
+        assert methods["direction_only"] == ["mlp", "prior"]
+        assert methods["unchanged"]["direction_only_excluded"] == ["mlp", "prior"] and methods["unchanged"]["ceiling"]
+        assert [methods["unchanged"][k] for k in ("max_effect", "min_padj", "min_unchanged", "tau")] == [
+            0.2,
+            0.2,
+            3,
+            0.1,
+        ]
+        summary = pd.read_csv(out / f"eval_{v}" / "summary_unchanged.csv", index_col=0)
+        assert "mlp" not in summary.index and {"scLDM_s0", "knn", "noise ceiling (split-half)"} <= set(summary.index)
+        assert (out / f"eval_controls_{v}" / "summary_unchanged.csv").exists()
         assert {p.stem for p in (out / f"eval_controls_{v}" / "per_perturbation").glob("*.csv")} >= {
             "scLDM_s0",
             "scLDM_w1",
@@ -730,6 +768,7 @@ def test_runner_end_to_end_resumes_and_stops_at_a5(eval_inputs):
         for suffix in (
             "_side_by_side.csv",
             "_side_by_side_specific.csv",
+            "_side_by_side_unchanged.csv",
             "_side_by_side_long.csv",
             "_side_by_side_panel.csv",
             "_side_by_side.md",
@@ -744,7 +783,19 @@ def test_runner_end_to_end_resumes_and_stops_at_a5(eval_inputs):
     }  # fmt: skip
     assert (wide.filtered_status == "ok").all() and (wide.all_status == "ok").all()
     assert wide.loc["scLDM_s0", "filtered_n"] > 0 and wide.loc["knn", "filtered_p_holm"] >= 0
+    third = pd.read_csv(res / f"{tag}_side_by_side_unchanged.csv", index_col=0)
+    assert list(third.index) == list(wide.index)  # the same rows; the direction-only methods are missing
+    for v in ("filtered", "all"):
+        assert set(third.index[third[f"{v}_status"] == "missing"]) == {"mlp", "prior"}
+    assert third.loc["scLDM_s0", "filtered_n"] > 0 and 0 <= third.loc["scLDM_s0", "filtered_median"] <= 1
+    md = (res / f"{tag}_side_by_side.md").read_text()
+    assert "## Changed vs unchanged genes" in md and "- not scored in filtered: mlp, prior" in md
+    assert "|Δ| < 0.2, padj ≥ 0.2" in md and ">= 3 unchanged genes" in md and "`three_class_balanced_acc`" in md
     prov = json.loads((res / f"{tag}.provenance.json").read_text())
+    assert prov["metrics"] == {"full": "balanced_acc", "specific": "balanced_acc", "unchanged": "detect_auroc"}
+    assert prov["min_unchanged"] == 3 and prov["unchanged"]["all"]["max_effect"] == 0.2
+    hashed = json.loads((out / "logs" / "side_by_side.hash.json").read_text())["files"]
+    assert {str(out / f"eval_{v}" / "summary_unchanged.csv") for v in ("filtered", "all")} <= set(hashed)
     manifest = d / "prepared" / "manifest.json"
     assert prov["extra_inputs"]["manifest"]["sha256"] == hashlib.sha256(manifest.read_bytes()).hexdigest()
     for k in range(3):
@@ -852,6 +903,14 @@ def test_runner_resume_reruns_a_step_whose_hash_changed(eval_inputs, tmp_path):
     r = run_runner(cfg, *over, job_root=job)
     assert r.returncode == 0 and "start select_sweep (hash changed: code: select_sweep.py)" in r.stdout
     assert "start select_check " in r.stdout and "skip truth_all " in r.stdout
+
+    # the tables depend on the content of each eval dir's changed-vs-unchanged summary
+    with (out / "eval_all" / "summary_unchanged.csv").open("a") as fh:
+        fh.write("\n")
+    r = run_runner(cfg, *over, job_root=job)
+    assert r.returncode == 0 and "start side_by_side (hash changed: files: " in r.stdout
+    assert "eval_all/summary_unchanged.csv" in r.stdout
+    assert "skip eval_all " in r.stdout and "skip side_by_side_controls " in r.stdout
 
     # a marker without a hash (an earlier runner wrote a timestamp) is stale
     (logs / "select_check.done").write_text("2026-11-10T12:00:00\n")

@@ -80,8 +80,15 @@ evaluate:                     # evaluate.py (always --exclude-target; --specific
   min_degs: 5
   eps: 0.0
   seed: 0                     # shuffled-control derangement
+  # third report, changed vs unchanged genes: does |predicted effect| separate the DEGs from the genes that
+  # clearly do not change? unchanged = not a DEG, |delta_true| < unchanged_max_effect, padj >= unchanged_min_padj
+  unchanged_max_effect: 0.05
+  unchanged_min_padj: 0.5
+  min_unchanged: 20           # unchanged genes a perturbation needs in that report (besides min_degs DEGs)
+  direction_only: [mlp, prior]  # P(up) - 0.5, a direction confidence, not an effect size: left out of that report
 
 stats:                        # side_by_side.py, the frozen tables' conventions (stats.py)
-  metric: balanced_acc
+  metric: balanced_acc        # headline of the full and the perturbation-specific report
+  unchanged_metric: detect_auroc  # headline of the changed-vs-unchanged report
   n_boot: 2000
   seed: 0

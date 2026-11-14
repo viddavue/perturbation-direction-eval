@@ -76,6 +76,28 @@ def test_pipeline_recovers_known_directions(tmp_path):
         assert deg.loc[p, [GENES[i] for i in [*up, *down]]].mean() > 0.9  # true effects detected
     cond = pd.read_csv(truth / "conditions.csv")
     assert cond["id"].tolist() == [CTRL, *test_perts] and (cond["cell_line"] == "T").all()
+    # the split-half files: half A's padj is saved next to its effects and DEG mask, indexed like them, and it
+    # is the padj those DEGs were called from (the changed-vs-unchanged report's ceiling labels genes with it)
+    assert {p.name for p in truth.iterdir()} == {
+        "delta_true.parquet",
+        "padj.parquet",
+        "deg.parquet",
+        "ceiling.csv",
+        "delta_half_a.parquet",
+        "delta_half_b.parquet",
+        "deg_half_a.parquet",
+        "padj_half_a.parquet",
+        "conditions.csv",
+        "info.json",
+    }
+    half_a, deg_a = pd.read_parquet(truth / "delta_half_a.parquet"), pd.read_parquet(truth / "deg_half_a.parquet")
+    padj_a = pd.read_parquet(truth / "padj_half_a.parquet")
+    assert list(padj_a.index) == list(half_a.index) == test_perts and list(padj_a.columns) == GENES
+    assert padj_a.notna().all().all() and ((padj_a >= 0) & (padj_a <= 1)).all().all()
+    pd.testing.assert_frame_equal(deg_a, (padj_a < 0.05) & (half_a.abs() > 0.1))
+    padj = pd.read_parquet(truth / "padj.parquet")
+    assert not np.allclose(padj_a.to_numpy(), padj.to_numpy())  # half the cells: not the full-data padj
+    pd.testing.assert_frame_equal(deg, (padj < 0.05) & (pd.read_parquet(truth / "delta_true.parquet").abs() > 0.1))
 
     base = tmp_path / "baselines"
     baselines.main(
@@ -128,6 +150,18 @@ def test_pipeline_recovers_known_directions(tmp_path):
     assert s.loc["oracle (shuffled)", "balanced_acc_median"] < 0.75  # effects are perturbation-specific
     assert s.loc["generic", "balanced_acc_median"] < 0.75  # p4's effect does not transfer to p1-p3
     assert (out / "accuracy_by_strength.png").exists()
+    # the truth dir has padj.parquet, so the changed-vs-unchanged report is written too, with its ceiling
+    u = pd.read_csv(out / "summary_unchanged.csv", index_col=0)
+    assert list(u.index) == ["oracle", "oracle (shuffled)", "transfer", "generic", "noise ceiling (split-half)"]
+    per = pd.read_csv(out / "per_perturbation_unchanged" / "oracle.csv", index_col=0)
+    assert (per["n_deg"] == deg.sum(1)).all()  # the DEGs of the full report (no --exclude-target here)
+    delta_true = pd.read_parquet(truth / "delta_true.parquet")
+    assert (per["n_unchanged"] == (~deg & (delta_true.abs() < 0.05) & (padj >= 0.5)).sum(1)).all()
+    assert (per["n_deg"] + per["n_unchanged"] + per["n_grey"] == len(GENES)).all()
+    # the oracle's |effect| is the truth's own: DEGs (|delta| > 0.1) always rank above unchanged genes (< 0.05)
+    scored = per[per["n_unchanged"] > 0]
+    assert (scored["detect_auroc"] == 1.0).all() and (scored["unchanged_call_rate"] == 0.0).all()
+    assert (per["deg_hit_rate"] == 1.0).all()
 
 
 def test_learned_baselines_and_specific_report(tmp_path):

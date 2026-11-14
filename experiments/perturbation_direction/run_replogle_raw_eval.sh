@@ -17,7 +17,9 @@
 #   baselines_<v>, learned_<v>        baselines.py (generic, transfer, kNN) and learned_baselines.py (prior, MLP),
 #                                     refitted on P/replogle_train_raw_<v> (--recompute: no stale caches)
 #   eval_<v>                          evaluate.py on O/truth_<v>_test: the preds (scLDM seeds) + the five baselines,
-#                                     --exclude-target, --specific-ref O/baselines_<v>/delta_generic.parquet
+#                                     --exclude-target, --specific-ref O/baselines_<v>/delta_generic.parquet; three
+#                                     reports: full effect, perturbation-specific, changed vs unchanged genes
+#                                     (evaluate.unchanged_* / min_unchanged; evaluate.direction_only is left out of it)
 #   controls_<v>                      optional: the reference + the configured generation controls -> O/eval_controls_<v>
 #   side_by_side[, _controls]         side_by_side.py table -> <results_dir>/<results_tag>[_controls]_*
 #
@@ -63,6 +65,7 @@ mapfile -t SWEEP < <(grep $'^SWEEP\t' <<< "$CFG_DUMP" || true)
 mapfile -t PREDS < <(grep $'^PRED\t' <<< "$CFG_DUMP" || true)
 mapfile -t CONTROLS < <(grep $'^CONTROL\t' <<< "$CFG_DUMP" || true)
 read -r -a VERSIONS <<< "$CFG_VERSIONS"
+read -r -a DIRECTION_ONLY <<< "$CFG_DIRECTION_ONLY"  # methods left out of the changed-vs-unchanged report
 # the resolved config as step_hash.py sees it (provenance-only keys such as md5_source left out)
 CFG_DIGEST=$("$PYTHON" - "$CONFIG" ${OVERRIDES[@]+"${OVERRIDES[@]}"} <<'PY'
 import sys
@@ -363,9 +366,16 @@ for v in "${VERSIONS[@]}"; do
 done
 
 # 5. evaluate each version on its own test truth
-EVAL_COMMON=(--exclude-target --min-degs "$CFG_MIN_DEGS" --eps "$CFG_EPS" --seed "$CFG_EVAL_SEED")
+EVAL_COMMON=(--exclude-target --min-degs "$CFG_MIN_DEGS" --eps "$CFG_EPS" --seed "$CFG_EVAL_SEED"
+             --unchanged-max-effect "$CFG_UNCH_MAX_EFFECT" --unchanged-min-padj "$CFG_UNCH_MIN_PADJ"
+             --min-unchanged "$CFG_MIN_UNCHANGED")
+if [ "${#DIRECTION_ONLY[@]}" -gt 0 ]; then EVAL_COMMON+=(--direction-only "${DIRECTION_ONLY[@]}"); fi
 EVAL_DIRS=()
 CONTROL_DIRS=()
+# the tables also depend on each eval dir's changed-vs-unchanged summary: hashed by content ("missing" when an
+# eval dir has no such report), next to the eval steps' markers in UPSTREAM
+EVAL_UNCHANGED=()
+CONTROL_UNCHANGED=()
 for v in "${VERSIONS[@]}"; do
   B="$O/baselines_$v"; L="$O/learned_$v"
   run_step "eval_$v" --code "$E/evaluate.py" "${PRED_STATS[@]}" -- \
@@ -374,17 +384,20 @@ for v in "${VERSIONS[@]}"; do
     "transfer=$B/delta_transfer.parquet" "prior=$L/delta_prior.parquet" \
     --specific-ref "$B/delta_generic.parquet" "${EVAL_COMMON[@]}" --out-dir "$O/eval_$v"
   EVAL_DIRS+=(--eval "$v=$O/eval_$v")
+  EVAL_UNCHANGED+=(--file "$O/eval_$v/summary_unchanged.csv")
   if [ "${#CONTROL_ARGS[@]}" -gt 0 ]; then
     run_step "controls_$v" --code "$E/evaluate.py" "${CONTROL_STATS[@]}" -- \
       "$PYTHON" -u "$E/evaluate.py" --truth-dir "$O/truth_${v}_test" \
       --pred "$REF_ARG" "${CONTROL_ARGS[@]}" --specific-ref "$B/delta_generic.parquet" "${EVAL_COMMON[@]}" \
       --out-dir "$O/eval_controls_$v"
     CONTROL_DIRS+=(--eval "$v=$O/eval_controls_$v")
+    CONTROL_UNCHANGED+=(--file "$O/eval_controls_$v/summary_unchanged.csv")
   fi
 done
 
 # 6. the side-by-side tables (+ provenance) in results_dir
-SBS_COMMON=(--primary "$PRIMARY" --reference "$CFG_REFERENCE" --metric "$CFG_METRIC" --min-degs "$CFG_MIN_DEGS"
+SBS_COMMON=(--primary "$PRIMARY" --reference "$CFG_REFERENCE" --metric "$CFG_METRIC"
+            --unchanged-metric "$CFG_UNCH_METRIC" --min-degs "$CFG_MIN_DEGS" --min-unchanged "$CFG_MIN_UNCHANGED"
             --n-boot "$CFG_N_BOOT" --seed "$CFG_STATS_SEED" --out-dir "$CFG_RESULTS_DIR" --timestamp "$STARTED"
             --config "$CONFIG" ${OVERRIDE_ARGS[@]+"${OVERRIDE_ARGS[@]}"}
             --input "manifest=$P/manifest.json" --input "inputs_stamp=$STAMP" --input "a5_truth=$O/verify/a5_truth.json"
@@ -394,13 +407,14 @@ FROZEN_ARGS=()
 if [ -n "$CFG_FROZEN_SUMMARY" ]; then FROZEN_ARGS+=(--frozen-summary "full=$CFG_FROZEN_SUMMARY"); fi
 if [ -n "$CFG_FROZEN_SUMMARY_SPECIFIC" ]; then FROZEN_ARGS+=(--frozen-summary "specific=$CFG_FROZEN_SUMMARY_SPECIFIC"); fi
 SBS_HASH=(--code "$E/side_by_side.py" --file "$P/manifest.json" --mask-argv "$STARTED")
-run_step side_by_side "${SBS_HASH[@]}" ${SUMMARY_FILES[@]+"${SUMMARY_FILES[@]}"} -- \
+run_step side_by_side "${SBS_HASH[@]}" ${SUMMARY_FILES[@]+"${SUMMARY_FILES[@]}"} \
+  ${EVAL_UNCHANGED[@]+"${EVAL_UNCHANGED[@]}"} -- \
   "$PYTHON" -u "$E/side_by_side.py" table "${EVAL_DIRS[@]}" "${SBS_COMMON[@]}" \
   ${FROZEN_ARGS[@]+"${FROZEN_ARGS[@]}"} --tag "$CFG_RESULTS_TAG" \
   --title "Replogle HepG2 test perturbations, raw rebuild: ${VERSIONS[*]} side by side"
 TABLES="$CFG_RESULTS_DIR/${CFG_RESULTS_TAG}_side_by_side.md"
 if [ "${#CONTROL_DIRS[@]}" -gt 0 ]; then
-  run_step side_by_side_controls "${SBS_HASH[@]}" -- \
+  run_step side_by_side_controls "${SBS_HASH[@]}" ${CONTROL_UNCHANGED[@]+"${CONTROL_UNCHANGED[@]}"} -- \
     "$PYTHON" -u "$E/side_by_side.py" table "${CONTROL_DIRS[@]}" "${SBS_COMMON[@]}" \
     --tag "${CFG_RESULTS_TAG}_controls" --title "Replogle HepG2 test perturbations, raw rebuild: generation controls"
   TABLES="$TABLES $CFG_RESULTS_DIR/${CFG_RESULTS_TAG}_controls_side_by_side.md"

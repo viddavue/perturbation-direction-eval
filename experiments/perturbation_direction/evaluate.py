@@ -11,6 +11,14 @@ prediction made for a different perturbation. If it scores like the matched pred
 direction calls are not perturbation-specific.
 
 Writes summary.csv (one row per method), by_strength.csv, per_perturbation/<method>.csv and plots.
+
+Both of these reports score the DIRECTION of the effect, and only on DEGs, so a method is never penalised
+for predicting changes in genes that do not change. A third report, "changed vs unchanged genes", asks
+that question: does the predicted effect size |delta_pred| separate the DEGs from the genes that clearly do
+not change (not a DEG, |delta_true| < --unchanged-max-effect, padj >= --unchanged-min-padj)? It is written
+whenever the truth dir has padj.parquet (unless --no-unchanged-report): summary_unchanged.csv and
+per_perturbation_unchanged/<method>.csv, see metrics.detection_metrics. Methods named with --direction-only
+(their output is a direction confidence, not an effect size) are left out of it.
 """
 
 from __future__ import annotations
@@ -28,13 +36,25 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from metrics import evaluate, remove_shared, shuffled_prediction, summarize
+from metrics import (
+    evaluate,
+    evaluate_detection,
+    remove_shared,
+    shuffled_prediction,
+    summarize,
+    summarize_detection,
+    unchanged_mask,
+)
 
 STRENGTH_BINS = [5, 20, 100, 500, np.inf]
 # reference categorical palette (fixed order, light mode) + text/grid tokens
 SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7",
           "#8c564b", "#17becf", "#bcbd22", "#7f7f7f", "#d62728"]
 TEXT, TEXT_2, GRID, SURFACE = "#0b0b0b", "#52514e", "#e4e3df", "#fcfcfb"
+CEILING = "noise ceiling (split-half)"
+UNCHANGED_TITLE = "Changed vs unchanged genes"
+# what the changed-vs-unchanged report's split-half ceiling needs from the truth dir
+UNCHANGED_CEILING_FILES = ("delta_half_a.parquet", "delta_half_b.parquet", "deg_half_a.parquet", "padj_half_a.parquet")
 
 
 def parse_named(items):
@@ -195,8 +215,99 @@ def report(methods, delta_true, deg, ceiling, exclude, args, out: pathlib.Path, 
         )
 
 
-def write_manifest(args, out: pathlib.Path, control: str) -> None:
-    """methods.json: where every scored method came from, so tools (e.g. dashboard.py) can reload the effects."""
+def scored_count(mask: pd.DataFrame, exclude: dict | None) -> pd.Series:
+    """Genes per perturbation in a perturbation x gene mask, the perturbation's own gene left out if excluded."""
+    n = mask.sum(1)
+    if exclude:
+        n = n - pd.Series({p: bool(mask.loc[p, p]) if p in mask.columns else False for p in mask.index})
+    return n
+
+
+def unchanged_methods(methods: dict[str, pd.DataFrame], direction_only: list[str]) -> tuple[dict, list[str]]:
+    """The methods of the changed-vs-unchanged report and the ones left out as direction-only.
+
+    A method named in ``direction_only`` outputs a direction confidence, not an effect size; its shuffled
+    control goes with it.
+    """
+    skip = set(direction_only) | {f"{n} (shuffled)" for n in direction_only}
+    return {n: d for n, d in methods.items() if n not in skip}, [n for n in methods if n in skip]
+
+
+def report_unchanged(methods, delta_true, deg, padj, halves, exclude, args, out: pathlib.Path, tau: float):
+    """The changed-vs-unchanged report: summary_unchanged.csv and per_perturbation_unchanged/<method>.csv.
+
+    ``halves``: (delta_half_a, delta_half_b, deg_half_a, padj_half_a) for the split-half ceiling, or None.
+    A knockdown enters the summary with >= --min-degs DEGs (the full report's rule) and >= --min-unchanged
+    unchanged genes, both counted on the full data with the target excluded; the ceiling follows the same panel.
+    """
+    tag = "_unchanged"
+    (out / f"per_perturbation{tag}").mkdir(parents=True, exist_ok=True)
+    limits = {"max_effect": args.unchanged_max_effect, "min_padj": args.unchanged_min_padj}
+    unchanged = unchanged_mask(delta_true, padj, deg, **limits)
+    per_pert = {
+        name: evaluate_detection(d, delta_true, deg, unchanged, exclude_genes=exclude, tau=tau)
+        for name, d in methods.items()
+    }
+    if halves is not None:
+        # labels (changed / unchanged) and signs from half A, scores |delta| from half B: independent cells
+        d_a, d_b, deg_a, padj_a = halves
+        unchanged_a = unchanged_mask(d_a, padj_a, deg_a, **limits)
+        per_pert[CEILING] = evaluate_detection(d_b, d_a, deg_a, unchanged_a, exclude_genes=exclude, tau=tau)
+
+    n_true, n_unchanged = scored_count(deg, exclude), scored_count(unchanged, exclude)
+    panel = (n_true >= args.min_degs) & (n_unchanged >= args.min_unchanged)
+    keep = panel.index[panel]
+    rows, written = {}, set()
+    for name, df in per_pert.items():
+        table = f"{name.replace(' ', '_').replace('/', '_')}.csv"
+        df.to_csv(out / f"per_perturbation{tag}" / table)
+        written.add(table)
+        rows[name] = summarize_detection(df.loc[df.index.intersection(keep)], min_degs=0, min_unchanged=0)
+        rows[name]["n_perturbations_total"] = len(df)
+    # this report's method set depends on --direction-only and on the truth dir (ceiling): a table left by an
+    # earlier run into the same directory would be read as a scored method (side_by_side.py reads the folder)
+    stale = sorted(f for f in (out / f"per_perturbation{tag}").glob("*.csv") if f.name not in written)
+    for f in stale:
+        f.unlink()
+    if stale:
+        print(f"removed {len(stale)} stale table(s) of an earlier run: {', '.join(f.name for f in stale)}")
+    summary = pd.DataFrame(rows).T
+    cols = [
+        "n_perturbations",
+        "detect_auroc_median",
+        "detect_auroc_all_median",
+        "three_class_balanced_acc_median",
+        "deg_call_rate_median",
+        "deg_hit_rate_median",
+        "unchanged_call_rate_median",
+        "abs_pred_deg_median_median",
+        "abs_pred_unchanged_median_median",
+    ]
+    cols = [c for c in cols if c in summary.columns]
+    summary = summary[cols + [c for c in summary.columns if c not in cols]]
+    summary.to_csv(out / f"summary{tag}.csv")
+
+    print(
+        f"panel: {len(keep)} of {len(panel)} perturbations with >= {args.min_degs} DEGs and >= "
+        f"{args.min_unchanged} unchanged genes (not a DEG, |delta_true| < {args.unchanged_max_effect}, padj >= "
+        f"{args.unchanged_min_padj}); call threshold tau = {tau}"
+    )
+    if len(keep):
+        n_grey = scored_count(~deg & ~unchanged, exclude)
+        print(
+            f"median genes per panel perturbation: {n_true.loc[keep].median():g} DEGs, "
+            f"{n_unchanged.loc[keep].median():g} unchanged, {n_grey.loc[keep].median():g} grey zone "
+            "(neither; left out of detect_auroc)"
+        )
+    with pd.option_context("display.width", 200, "display.max_columns", 20, "display.precision", 3):
+        print(summary[cols])
+
+
+def write_manifest(args, out: pathlib.Path, control: str, unchanged: dict | None = None) -> None:
+    """methods.json: where every scored method came from, so tools (e.g. dashboard.py) can reload the effects.
+
+    ``unchanged``: the resolved settings of the changed-vs-unchanged report, None when it is not written.
+    """
 
     def entry(path):
         return {"path": str(path), "abs_path": str(pathlib.Path(path).resolve())}
@@ -215,6 +326,8 @@ def write_manifest(args, out: pathlib.Path, control: str) -> None:
         "eps": args.eps,
         "min_degs": args.min_degs,
         "methods": methods,
+        "direction_only": list(args.direction_only),
+        "unchanged": unchanged,
     }
     (out / "methods.json").write_text(json.dumps(manifest, indent=1))
 
@@ -234,6 +347,37 @@ def main(argv=None):
         "scoring the direction of the perturbation-specific part (effect - beta_p * shared, beta_p fitted per "
         "perturbation) and how well each method predicts beta_p (shared_strength_corr)",
     )
+    ap.add_argument(
+        "--unchanged-max-effect",
+        type=float,
+        default=0.05,
+        help="changed-vs-unchanged report: an unchanged gene has |delta_true| below this",
+    )
+    ap.add_argument(
+        "--unchanged-min-padj",
+        type=float,
+        default=0.5,
+        help="changed-vs-unchanged report: an unchanged gene has a BH-adjusted p of at least this",
+    )
+    ap.add_argument(
+        "--min-unchanged",
+        type=int,
+        default=20,
+        help="changed-vs-unchanged report: unchanged genes a perturbation needs (besides --min-degs DEGs)",
+    )
+    ap.add_argument(
+        "--direction-only",
+        nargs="*",
+        default=[],
+        metavar="NAME",
+        help="methods whose output is a direction confidence, not an effect size (learned_baselines.py writes "
+        "P(up) - 0.5 for mlp and prior): left out of the changed-vs-unchanged report",
+    )
+    ap.add_argument(
+        "--no-unchanged-report",
+        action="store_true",
+        help="do not write the changed-vs-unchanged report (default: written when the truth dir has padj.parquet)",
+    )
     ap.add_argument("--out-dir", required=True)
     args = ap.parse_args(argv)
 
@@ -243,10 +387,11 @@ def main(argv=None):
     delta_true = pd.read_parquet(truth_dir / "delta_true.parquet")
     # a truth dir without a deg.parquet (e.g. a sensitivity sweep that only stored effects) still
     # scores: DEGs are then recomputed with the same rule ground_truth.py applies
+    has_padj = (truth_dir / "padj.parquet").exists()
+    padj = pd.read_parquet(truth_dir / "padj.parquet") if has_padj else None
     if (truth_dir / "deg.parquet").exists():
         deg = pd.read_parquet(truth_dir / "deg.parquet")
     else:
-        padj = pd.read_parquet(truth_dir / "padj.parquet")
         deg = (padj < info.get("alpha", 0.05)) & (delta_true.abs() > info.get("min_lfc", 0.1))
         print(f"no deg.parquet in {truth_dir}: rebuilt DEGs from padj at alpha={info.get('alpha', 0.05)}, "
               f"min_lfc={info.get('min_lfc', 0.1)}")
@@ -276,10 +421,45 @@ def main(argv=None):
     for name, path in parse_named(args.baseline).items():
         methods[name] = pd.read_parquet(path)
 
-    write_manifest(args, out, info["control"])
+    # changed-vs-unchanged report: needs the truth's padj; direction-only methods have no effect size to score
+    unchanged_settings, missing_halves = None, []
+    if has_padj and not args.no_unchanged_report:
+        scored, left_out = unchanged_methods(methods, args.direction_only)
+        missing_halves = [f for f in UNCHANGED_CEILING_FILES if not (truth_dir / f).exists()]
+        unchanged_settings = {
+            "max_effect": args.unchanged_max_effect,
+            "min_padj": args.unchanged_min_padj,
+            "min_unchanged": args.min_unchanged,
+            "tau": info.get("min_lfc", 0.1),
+            "methods": list(scored),
+            "direction_only_excluded": left_out,
+            "ceiling": not missing_halves,
+        }
+    write_manifest(args, out, info["control"], unchanged_settings)
     ceiling_path = truth_dir / "ceiling.csv"
     ceiling = pd.read_csv(ceiling_path, index_col=0) if ceiling_path.exists() else None
     report(methods, delta_true, deg, ceiling, exclude, args, out, "", {"target_gene_down_frac": target_down})
+
+    if unchanged_settings is not None:
+        print(f"\n=== {UNCHANGED_TITLE.lower()} (does |predicted effect| separate DEGs from unchanged genes?) ===")
+        unknown = sorted(set(args.direction_only) - set(methods))
+        print(
+            f"left out as direction-only (a direction confidence, not an effect size): "
+            f"{', '.join(left_out) if left_out else 'none'}"
+            + (f"; --direction-only names not scored here: {', '.join(unknown)}" if unknown else "")
+        )
+        halves = None
+        if missing_halves:
+            print(
+                f"no split-half ceiling for this report: {truth_dir} has no {', '.join(missing_halves)} "
+                "(a truth dir written before ground_truth.py saved half A's padj; rerun ground_truth.py, and "
+                "subset_truth.py for a subset, to add it)"
+            )
+        else:
+            halves = tuple(pd.read_parquet(truth_dir / f) for f in UNCHANGED_CEILING_FILES)
+        report_unchanged(scored, delta_true, deg, padj, halves, exclude, args, out, unchanged_settings["tau"])
+    elif not args.no_unchanged_report:
+        print(f"\nno padj.parquet in {truth_dir}: the changed-vs-unchanged report is not written")
 
     if args.specific_ref:
         # perturbation-specific component: project the shared response out of truth and every prediction,
