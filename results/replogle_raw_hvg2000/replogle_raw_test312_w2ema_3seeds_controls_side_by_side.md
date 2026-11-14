@@ -1,6 +1,6 @@
 # Replogle HepG2 test perturbations, raw rebuild: generation controls
 
-Median balanced sign accuracy on the **shared panel**: perturbations with >= 5 scored DEGs (target gene excluded) in every version (filtered, all), per report. 95% percentile bootstrap CI over perturbations (2000 resamples, seed 0). Δ = paired median difference scLDM_s0 − method (> 0: scLDM_s0 better) with its bootstrap CI; p = two-sided Wilcoxon signed-rank, raw / Holm within each column (report × version). n = perturbations entering the median: at most the panel size, fewer where the metric is undefined (balanced accuracy needs up and down DEGs) and for the split-half ceiling, which also needs >= 5 DEGs in its half. `—` = not scored there.
+Median balanced sign accuracy on the **shared panel**: perturbations with >= 5 scored DEGs (target gene excluded) in every version (filtered, all), per report. 95% percentile bootstrap CI over perturbations (2000 resamples, seed 0). Δ = paired median difference scLDM_s0 − method (> 0: scLDM_s0 better) with its bootstrap CI; p = two-sided Wilcoxon signed-rank, raw / Holm within each column (report × version). n = perturbations entering the median: at most the panel size, fewer where the metric is undefined (balanced accuracy needs up and down DEGs) and for the split-half ceiling, which also needs >= 5 DEGs in its half. `—` = not scored there. The third report (changed vs unchanged genes) has its own headline metric and panel rule, stated in its section; its statistics are computed the same way.
 
 ## Full effect
 
@@ -64,6 +64,71 @@ Own panels: each version's own >= 5-DEG perturbations, as freeze_results.py woul
 | scLDM_w1 (shuffled) | 190 | 0.486 [0.469, 0.504] | 191 | 0.480 [0.468, 0.498] |
 | scLDM_w0 (shuffled) | 58 | 0.602 [0.578, 0.626] | 59 | 0.619 [0.580, 0.636] |
 | noise ceiling (split-half) | 156 | 0.848 [0.833, 0.873] | 153 | 0.833 [0.820, 0.856] |
+
+- in the filtered panel only (2): GART, SETX
+- in the all panel only (3): GFER, RRP15, USP10
+
+## Changed vs unchanged genes
+
+Does the predicted effect **size** separate the genes that change from the genes that clearly do not? (The reports above score the direction, on DEGs only.) Per perturbation, `detect_auroc` is the AUROC of |predicted effect| for its changed genes (the DEGs) against its unchanged genes (not a DEG, |Δ| < 0.05, padj ≥ 0.5); the genes in between (not significant, but not clearly unaffected) are left out. 0.5 = no separation. The table gives the median over the shared panel. Panel rule of this report: >= 5 scored DEGs **and** >= 20 unchanged genes (target gene excluded) in every version that has the report. The split-half ceiling takes the changed / unchanged labels from half A and |Δ| from half B, and needs both counts in its own half.
+
+Shared panel: **191** perturbations (filtered own 193, all own 194).
+
+| method | filtered (primary) n | filtered (primary) median [95% CI] | Δ [95% CI] | p raw / Holm | all n | all median [95% CI] | Δ [95% CI] | p raw / Holm |
+|---|---:|---|---|---|---:|---|---|---|
+| **scLDM_s0** (reference) | 191 | 0.845 [0.823, 0.864] |  |  | 191 | 0.847 [0.821, 0.865] |  |  |
+| scLDM_w2_ema_cells128 | 191 | 0.857 [0.825, 0.874] | -0.007 [-0.009, -0.006] | 2e-19 / 6.1e-19 | 191 | 0.857 [0.824, 0.871] | -0.007 [-0.008, -0.005] | 3.6e-18 / 1.1e-17 |
+| scLDM_w1 | 191 | 0.816 [0.797, 0.834] | +0.020 [+0.017, +0.025] | 8.4e-16 / 1.7e-15 | 191 | 0.817 [0.801, 0.834] | +0.020 [+0.017, +0.023] | 2e-13 / 4e-13 |
+| scLDM_w0 | 191 | 0.500 [0.500, 0.500] | +0.323 [+0.296, +0.356] | 3.5e-32 / 2.8e-31 | 191 | 0.500 [0.500, 0.500] | +0.326 [+0.300, +0.353] | 5.2e-32 / 4.2e-31 |
+| scLDM_s0 (shuffled) | 191 | 0.679 [0.659, 0.711] | +0.113 [+0.095, +0.135] | 2.5e-21 / 1.3e-20 | 191 | 0.685 [0.656, 0.716] | +0.115 [+0.098, +0.136] | 2e-21 / 1e-20 |
+| scLDM_w2_ema_cells128 (shuffled) | 191 | 0.695 [0.660, 0.724] | +0.108 [+0.082, +0.134] | 1.4e-19 / 5.5e-19 | 191 | 0.689 [0.663, 0.720] | +0.106 [+0.084, +0.132] | 2e-19 / 8.1e-19 |
+| scLDM_w1 (shuffled) | 191 | 0.671 [0.647, 0.695] | +0.125 [+0.106, +0.151] | 2.1e-23 / 1.3e-22 | 191 | 0.671 [0.655, 0.703] | +0.124 [+0.109, +0.159] | 5.7e-23 / 3.4e-22 |
+| scLDM_w0 (shuffled) | 191 | 0.500 [0.500, 0.500] | +0.334 [+0.316, +0.357] | 5.9e-32 / 4.2e-31 | 191 | 0.500 [0.500, 0.500] | +0.339 [+0.312, +0.354] | 9.9e-32 / 6.9e-31 |
+| noise ceiling (split-half) | 155 | 0.879 [0.871, 0.891] | -0.015 [-0.021, +0.001] | 0.00092 / 0.00092 | 157 | 0.880 [0.869, 0.890] | -0.010 [-0.031, +0.001] | 0.0012 / 0.0012 |
+
+Own panels: each version's own perturbations with >= 5 DEGs and >= 20 unchanged genes.
+
+| method | filtered (primary) n | filtered (primary) median [95% CI] | all n | all median [95% CI] |
+|---|---:|---|---:|---|
+| scLDM_s0 | 193 | 0.841 [0.823, 0.864] | 194 | 0.846 [0.817, 0.860] |
+| scLDM_w2_ema_cells128 | 193 | 0.857 [0.825, 0.872] | 194 | 0.853 [0.822, 0.871] |
+| scLDM_w1 | 193 | 0.815 [0.795, 0.834] | 194 | 0.814 [0.797, 0.831] |
+| scLDM_w0 | 193 | 0.500 [0.500, 0.500] | 194 | 0.500 [0.500, 0.500] |
+| scLDM_s0 (shuffled) | 193 | 0.679 [0.657, 0.711] | 194 | 0.684 [0.655, 0.715] |
+| scLDM_w2_ema_cells128 (shuffled) | 193 | 0.695 [0.660, 0.724] | 194 | 0.689 [0.662, 0.720] |
+| scLDM_w1 (shuffled) | 193 | 0.669 [0.646, 0.687] | 194 | 0.670 [0.655, 0.701] |
+| scLDM_w0 (shuffled) | 193 | 0.500 [0.500, 0.500] | 194 | 0.500 [0.500, 0.500] |
+| noise ceiling (split-half) | 158 | 0.877 [0.869, 0.890] | 157 | 0.880 [0.869, 0.890] |
+
+Secondary medians on the shared panel, per version. A gene is called changed if |predicted effect| > τ (τ = 0.1). `three_class_balanced_acc`: mean recall of up-DEGs (predicted > τ), down-DEGs (< −τ) and unchanged genes (|.| ≤ τ); `deg_call_rate` / `unchanged_call_rate`: share of DEGs / unchanged genes called changed; `deg_hit_rate`: share of DEGs called with the correct sign; `abs_pred_*_median`: median |predicted effect| on DEGs / unchanged genes; `detect_auroc_all`: the headline AUROC with every non-DEG (unchanged + grey zone) as the negative class. n = perturbations entering (a metric undefined for a perturbation skips it). These depend on τ and on the scale of the prediction; the headline does not.
+
+filtered (primary):
+
+| method | n | `three_class_balanced_acc` | `deg_call_rate` | `deg_hit_rate` | `unchanged_call_rate` | `abs_pred_deg_median` | `abs_pred_unchanged_median` | `detect_auroc_all` |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| scLDM_s0 | 191 | 0.735 | 0.778 | 0.753 | 0.231 | 0.237 | 0.049 | 0.794 |
+| scLDM_w2_ema_cells128 | 191 | 0.735 | 0.777 | 0.739 | 0.198 | 0.214 | 0.044 | 0.805 |
+| scLDM_w1 | 191 | 0.674 | 0.636 | 0.631 | 0.121 | 0.159 | 0.036 | 0.776 |
+| scLDM_w0 | 191 | 0.333 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.500 |
+| scLDM_s0 (shuffled) | 191 | 0.460 | 0.400 | 0.313 | 0.088 | 0.077 | 0.028 | 0.654 |
+| scLDM_w2_ema_cells128 (shuffled) | 191 | 0.471 | 0.372 | 0.307 | 0.077 | 0.071 | 0.026 | 0.653 |
+| scLDM_w1 (shuffled) | 191 | 0.453 | 0.263 | 0.232 | 0.053 | 0.061 | 0.023 | 0.632 |
+| scLDM_w0 (shuffled) | 191 | 0.333 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.500 |
+| noise ceiling (split-half) | 155 | 0.781 | 0.895 | 0.887 | 0.398 | 0.319 | 0.078 | 0.839 |
+
+all:
+
+| method | n | `three_class_balanced_acc` | `deg_call_rate` | `deg_hit_rate` | `unchanged_call_rate` | `abs_pred_deg_median` | `abs_pred_unchanged_median` | `detect_auroc_all` |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| scLDM_s0 | 191 | 0.725 | 0.778 | 0.752 | 0.233 | 0.234 | 0.050 | 0.789 |
+| scLDM_w2_ema_cells128 | 191 | 0.731 | 0.765 | 0.734 | 0.200 | 0.215 | 0.043 | 0.798 |
+| scLDM_w1 | 191 | 0.675 | 0.647 | 0.640 | 0.126 | 0.156 | 0.035 | 0.769 |
+| scLDM_w0 | 191 | 0.333 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.500 |
+| scLDM_s0 (shuffled) | 191 | 0.463 | 0.390 | 0.329 | 0.091 | 0.077 | 0.028 | 0.658 |
+| scLDM_w2_ema_cells128 (shuffled) | 191 | 0.466 | 0.378 | 0.316 | 0.074 | 0.069 | 0.026 | 0.655 |
+| scLDM_w1 (shuffled) | 191 | 0.429 | 0.261 | 0.200 | 0.051 | 0.052 | 0.023 | 0.637 |
+| scLDM_w0 (shuffled) | 191 | 0.333 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.500 |
+| noise ceiling (split-half) | 157 | 0.780 | 0.878 | 0.868 | 0.379 | 0.308 | 0.075 | 0.837 |
 
 - in the filtered panel only (2): GART, SETX
 - in the all panel only (3): GFER, RRP15, USP10

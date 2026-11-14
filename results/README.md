@@ -76,8 +76,9 @@ baseline loses by 0.02-0.16 with p < 1e-4.
 ## Replogle HepG2, raw rebuild: filtered | all side by side
 
 Tables written by `side_by_side.py` into `results/replogle_raw_hvg2000/` with tag
-`replogle_raw_test312_w2ema_3seeds`, generated on student03 from the clean commit `ab1287d`
-(provenance `dirty=false`). A first run from an uncommitted tree gave byte-identical tables.
+`replogle_raw_test312_w2ema_3seeds`, generated on student03 from the clean commit `108a8c6`
+(provenance `dirty=false`). The full-effect and perturbation-specific wide tables are byte-identical
+to the earlier run from the clean commit `ab1287d`; `108a8c6` adds the changed-vs-unchanged report.
 
 Output files per `side_by_side.py table`:
 
@@ -86,6 +87,7 @@ Output files per `side_by_side.py table`:
 | `_side_by_side.md` | main markdown table (shared panel, full + specific, own panels, vs frozen) |
 | `_side_by_side.csv` | full-effect wide table: one row per method, columns `<version>_<stat>` |
 | `_side_by_side_specific.csv` | same for the perturbation-specific report |
+| `_side_by_side_unchanged.csv` | same for the changed-vs-unchanged report (headline `detect_auroc`) |
 | `_side_by_side_long.csv` | all numbers in long form (`report`, `version`, `method`, stats) |
 | `_side_by_side_panel.csv` | per report and perturbation: n_deg per version, panel membership |
 | `_side_by_side_vs_frozen.csv` | filtered own panel vs the frozen STATE-based summary tables |
@@ -146,6 +148,27 @@ p raw / Holm), copied from `replogle_raw_test312_w2ema_3seeds_side_by_side.md`:
 generic, transfer, prior and every shuffled control lose to scLDM_s0 in both versions and both reports
 (Holm p <= 3e-5); the other two scLDM seeds differ from seed 0 by at most 0.002 (paired median); the
 split-half noise ceiling lies above scLDM. The full table is in the `.md` file.
+
+### Changed vs unchanged genes, shared panel (191 perturbations; filtered own 193, all own 194)
+
+Median per-perturbation AUROC of |predicted Δ| for DEGs vs clearly unchanged genes (not a DEG,
+|Δ| < 0.05, padj >= 0.5); Δ = scLDM_s0 − method, p raw / Holm. MLP and prior are not scored
+(direction confidences, not effect sizes).
+
+| method | filtered median [95% CI] | filtered Δ, p | all median [95% CI] | all Δ, p |
+|---|---|---|---|---|
+| **scLDM_s0** (reference) | 0.845 [0.823, 0.864] | | 0.847 [0.821, 0.865] | |
+| scLDM_s1 | 0.839 [0.814, 0.863] | +0.002, 0.061 / 0.12 | 0.837 [0.815, 0.861] | +0.002, 0.067 / 0.13 |
+| scLDM_s2 | 0.849 [0.819, 0.865] | +0.001, 0.48 / 0.48 | 0.849 [0.821, 0.864] | +0.000, 0.4 / 0.4 |
+| knn | 0.879 [0.860, 0.892] | −0.023, 1.4e-14 / 8.4e-14 | 0.872 [0.856, 0.890] | −0.017, 1.2e-14 / 7.5e-14 |
+| generic | 0.821 [0.805, 0.832] | +0.021, 0.034 / 0.1 | 0.817 [0.805, 0.833] | +0.025, 0.016 / 0.047 |
+| transfer | 0.743 [0.731, 0.756] | +0.070, 2.7e-10 / 1.3e-09 | 0.755 [0.746, 0.769] | +0.067, 3.9e-09 / 1.9e-08 |
+| scLDM_s0 (shuffled) | 0.679 [0.659, 0.711] | +0.113, 2.5e-21 / 2e-20 | 0.685 [0.656, 0.716] | +0.115, 2e-21 / 1.8e-20 |
+| noise ceiling (split-half) | 0.879 [0.871, 0.891] (n=155) | −0.015, 0.00092 / 0.0037 | 0.880 [0.869, 0.890] (n=157) | −0.010, 0.0012 / 0.0048 |
+
+kNN reaches the split-half ceiling here: half-B effects carry the sampling noise of half the cells,
+so this ceiling is a noise reference, not an upper bound (METHODS.md g). Secondary medians
+(three-class balanced accuracy, call rates) are in the `.md` file.
 
 ### Own panels (each version's own ≥ 5-DEG perturbations)
 

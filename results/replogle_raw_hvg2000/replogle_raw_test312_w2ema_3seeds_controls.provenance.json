@@ -1,31 +1,31 @@
 {
   "tag": "replogle_raw_test312_w2ema_3seeds_controls",
-  "timestamp": "2026-11-11T07:23:22Z",
+  "timestamp": "2026-11-14T09:11:27Z",
   "git": {
-    "commit": "ab1287d4c00d2c73658eb7a97106b77b241f8298",
+    "commit": "108a8c66a29a85d9ce69e6447d9951cd269b1313",
     "dirty": false,
     "changed_paths": 0,
-    "ignored_output_paths": 7
+    "ignored_output_paths": 5
   },
   "code": {
-    "ground_truth.py": "5dc88e0c63c8d03f6ab9825b6462a67c2a511fcb3c43b6392be3641c116140e6",
-    "subset_truth.py": "eb2a774cfd804d0e5232ba5074ce436a0021fb31c9852085c85155658bce60f0",
+    "ground_truth.py": "25e5763386f2a4e74758591020a6727bd12a0644b6e46f979e0ba24d22215466",
+    "subset_truth.py": "269a639bb247059b2f19eb2768de50bef68afce462965f3197cbf6f96199f4c4",
     "verify_merge.py": "650160860f2081127cb9900b834f39c4745559da237b33dc6d8b2ff7edf25f50",
     "select_sweep.py": "58f736a79479c0a2e8baf4589063cee70852fb3c0aec5c5088f6b7096dabc886",
     "baselines.py": "f6f7b23db217777cd0eb6f264aa9b5659acfac893222da16a2b99fd3e8641b03",
     "transfer_models.py": "a24d3799b1e0aed36da05b22c551bde8862604913004f2e0d14e69d623a88168",
     "learned_baselines.py": "b8befdb487be95f5661806acdadc1aab3bfd5868df722d0e321d287ef8d13429",
     "direction_models.py": "957beb88d6380d440cf89413961c584dff1d24eee6740a37cef7a6bf2c4eb8fe",
-    "metrics.py": "c44822ee5c2f8daf03b3b82a44ba7a9964d7ac13927dc13ae4f5226c56ecb718",
-    "evaluate.py": "c708224fcc1e1e5fe963fa3f990c8750d07f34f9923e1de549b8199d722751c4",
+    "metrics.py": "940a04d72ad780cc60b0eaa849fbb01d88f5364d2be2277044c5922854e06e2c",
+    "evaluate.py": "1caedc705b283f2b76684bec22551753da9597b3d5efbccb59618d0578046628",
     "stats.py": "1da232ddd54881524265d79f945d248768074957abcb195c4850f303bd213c8f",
-    "freeze_results.py": "d2adb989180933ec00bf37bddb14181e5ad890f097301516b7bb9066d575cc58",
-    "side_by_side.py": "3b5f234936f52c6712c3e7ddeabd22656ed5a0c20b2461c35fc5fbcca0e2589b",
-    "run_replogle_raw_eval.sh": "1ed9b236858fc282d490369a23eca43b5522904e9b58eaec91958ae3ff2fad0d"
+    "freeze_results.py": "4d8d50337fe33e02ee2330920ae90a995f872983e80fdf0c7ceb4038af767a0c",
+    "side_by_side.py": "8fb846d5227e33cd399af6b1aaa9aa1aa5d7aaa5c302ec7e262b021743c56b72",
+    "run_replogle_raw_eval.sh": "c1145094b830912eef1af26dd20cdf0f0e367a4e637f61fe8455cec43f5d51ad"
   },
   "config": {
     "path": "experiments/configs/perturbation_direction/replogle_raw_eval.yaml",
-    "sha256": "ff0e293eba1a090a4d20c53543268a982c9f30c5a928b0b87fad802bfc28f6b0",
+    "sha256": "59f31f306e74e485085b869cdc5ee98f83674ad0b6d6bc8a901c7d3d8bc82536",
     "overrides": [
       "results_dir=results/replogle_raw_hvg2000"
     ],
@@ -100,10 +100,18 @@
       "evaluate": {
         "min_degs": 5,
         "eps": 0.0,
-        "seed": 0
+        "seed": 0,
+        "unchanged_max_effect": 0.05,
+        "unchanged_min_padj": 0.5,
+        "min_unchanged": 20,
+        "direction_only": [
+          "mlp",
+          "prior"
+        ]
       },
       "stats": {
         "metric": "balanced_acc",
+        "unchanged_metric": "detect_auroc",
         "n_boot": 2000,
         "seed": 0
       }
@@ -120,8 +128,53 @@
   "primary": "filtered",
   "reference": "scLDM_s0",
   "metric": "balanced_acc",
+  "metrics": {
+    "full": "balanced_acc",
+    "specific": "balanced_acc",
+    "unchanged": "detect_auroc"
+  },
   "min_degs": 5,
+  "min_unchanged": 20,
   "panel": "per report: perturbations with >= min_degs scored DEGs (target excluded) in every version",
+  "panel_unchanged": "changed-vs-unchanged report: >= min_degs scored DEGs and >= min_unchanged unchanged genes (target excluded) in every version that has the report",
+  "unchanged": {
+    "filtered": {
+      "max_effect": 0.05,
+      "min_padj": 0.5,
+      "min_unchanged": 20,
+      "tau": 0.1,
+      "methods": [
+        "scLDM_s0",
+        "scLDM_s0 (shuffled)",
+        "scLDM_w2_ema_cells128",
+        "scLDM_w2_ema_cells128 (shuffled)",
+        "scLDM_w1",
+        "scLDM_w1 (shuffled)",
+        "scLDM_w0",
+        "scLDM_w0 (shuffled)"
+      ],
+      "direction_only_excluded": [],
+      "ceiling": true
+    },
+    "all": {
+      "max_effect": 0.05,
+      "min_padj": 0.5,
+      "min_unchanged": 20,
+      "tau": 0.1,
+      "methods": [
+        "scLDM_s0",
+        "scLDM_s0 (shuffled)",
+        "scLDM_w2_ema_cells128",
+        "scLDM_w2_ema_cells128 (shuffled)",
+        "scLDM_w1",
+        "scLDM_w1 (shuffled)",
+        "scLDM_w0",
+        "scLDM_w0 (shuffled)"
+      ],
+      "direction_only_excluded": [],
+      "ceiling": true
+    }
+  },
   "bootstrap": {
     "n_boot": 2000,
     "seed": 0,
@@ -152,7 +205,8 @@
         "filtered": [],
         "all": []
       },
-      "n_deg_inconsistent": {}
+      "n_deg_inconsistent": {},
+      "versions_without_report": []
     },
     "specific": {
       "shared": 190,
@@ -175,7 +229,32 @@
         "filtered": [],
         "all": []
       },
-      "n_deg_inconsistent": {}
+      "n_deg_inconsistent": {},
+      "versions_without_report": []
+    },
+    "unchanged": {
+      "shared": 191,
+      "own": {
+        "filtered": 193,
+        "all": 194
+      },
+      "only_in": {
+        "filtered": [
+          "GART",
+          "SETX"
+        ],
+        "all": [
+          "GFER",
+          "RRP15",
+          "USP10"
+        ]
+      },
+      "absent_from": {
+        "filtered": [],
+        "all": []
+      },
+      "n_deg_inconsistent": {},
+      "versions_without_report": []
     }
   },
   "missing_methods": {
@@ -184,6 +263,10 @@
       "all": []
     },
     "specific": {
+      "filtered": [],
+      "all": []
+    },
+    "unchanged": {
       "filtered": [],
       "all": []
     }
@@ -196,11 +279,16 @@
     "specific": {
       "filtered": [],
       "all": []
+    },
+    "unchanged": {
+      "filtered": [],
+      "all": []
     }
   },
   "inputs": {
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_filtered/summary.csv": "4fe467d8018ea75dcfa427744b22bce97c25257d5896245227ac29983b9bd660",
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_filtered/summary_specific.csv": "e2abd1806b06822e82361725699c6b5770248206fa51818e6f42ce1d4b8bb2ca",
+    "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_filtered/summary_unchanged.csv": "09675e93af66f1cbda5117e58c81de15e14624dfc70104f0f1900ae29aca29dc",
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_filtered/per_perturbation/noise_ceiling_(split-half).csv": "5b86068cdf2df0479b095e515f24c5590efd953a1a289e781c13083c983a2891",
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_filtered/per_perturbation/scLDM_s0.csv": "42014b1225036ea874dc5efd401b655200860252b6e132878d443ac611733115",
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_filtered/per_perturbation/scLDM_s0_(shuffled).csv": "67b9f15dc0dffe831c27587174561968e7b828ac69a78019ca02252bbdd4c421",
@@ -219,7 +307,16 @@
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_filtered/per_perturbation_specific/scLDM_w1_(shuffled).csv": "997fbf757ac4855f3e0187f4304cf35590a481a773d423f4dc41537663d06b90",
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_filtered/per_perturbation_specific/scLDM_w2_ema_cells128.csv": "7b5525c722d5eadcebe7b9be8598649622dfe1fd41344082e7fb0c4626dfa8bb",
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_filtered/per_perturbation_specific/scLDM_w2_ema_cells128_(shuffled).csv": "52eab15be1f96471614925552b6e437c994deb09219917ff4116d87f27ee1e3a",
-    "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_filtered/methods.json": "a07654a0004d79f2fbfdd7b46f6cdfa6cc8207e44d623d1cded1a54341cdcb20",
+    "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_filtered/per_perturbation_unchanged/noise_ceiling_(split-half).csv": "500331f4601f1ab86bd4c701f9f283a5f6802e6b84ce4c25944c5f58da528fa0",
+    "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_filtered/per_perturbation_unchanged/scLDM_s0.csv": "462339ca3c96c36736c6b5fce82e5fb7b872ef6e245d2bcbbcb2152551aa84e4",
+    "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_filtered/per_perturbation_unchanged/scLDM_s0_(shuffled).csv": "7d443bad4dd9f6b4c59e0fff38c9665c9314a1b0bca8fa9e182b4134e621592a",
+    "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_filtered/per_perturbation_unchanged/scLDM_w0.csv": "8a738419fcaf72a953a525e39636c1380c78c9e8deead937e699028451081048",
+    "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_filtered/per_perturbation_unchanged/scLDM_w0_(shuffled).csv": "50680caed5cf8e14a218cb0230135adfbf4c7256e96e9288a4d427dd12d5d1da",
+    "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_filtered/per_perturbation_unchanged/scLDM_w1.csv": "085e9480684c88ad6c9e091a8d0370754ed95986c6bac3c2595b0b6802bd390c",
+    "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_filtered/per_perturbation_unchanged/scLDM_w1_(shuffled).csv": "38f2b4b4af1f05cc32bd776ca0f0a448096d8031375518d5eac9d6ae5180861c",
+    "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_filtered/per_perturbation_unchanged/scLDM_w2_ema_cells128.csv": "8856323ba545e78d45d310504fdecf0ab7ad98a6fe5eff967860668b126553ec",
+    "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_filtered/per_perturbation_unchanged/scLDM_w2_ema_cells128_(shuffled).csv": "3d775078e74acd27a809030dbbb7db7dab11ed315e2166aa12054abe79181682",
+    "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_filtered/methods.json": "6a96d62b9405020e1d7d426cf8fe08c248645f7c8afca76d27d1f6b6db50b203",
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/truth_filtered_test/ceiling.csv": "5b86068cdf2df0479b095e515f24c5590efd953a1a289e781c13083c983a2891",
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/truth_filtered_test/deg.parquet": "980619e8e55bdb1ee23a44a9ba9e4a6043d3cbabee07f6885d706efc4f4f1e63",
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/truth_filtered_test/deg_half_a.parquet": "af126323c7e1d48d250cfa2eb4ca605dd60f8ed2e8f72b555a07c6c3678aaef1",
@@ -228,6 +325,7 @@
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/truth_filtered_test/delta_true.parquet": "ded592a4dffc649597c033928005ef247bffb1ae932ddcf60fe944e0e123600f",
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/truth_filtered_test/info.json": "c4ed725a2a800c9d73950f11b129ad54be5001faf677ffbcbbb1e63d48a6fac3",
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/truth_filtered_test/padj.parquet": "7997f29f24004c2e58e4b572251492361a9e6773e58e73e2d36a0d23abca7e51",
+    "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/truth_filtered_test/padj_half_a.parquet": "5bcc221467eb4e3675ca0ad3bb9269a361dc90b14252efc147cfd35b69464f88",
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/baselines_filtered/delta_generic.parquet": "4ef95aaa3c8153961278c152cf798900a57da9f96eff976d1cffd982e6c30267",
     "/system/user/studentwork/fleischa/scldm_generation_20261020/outputs/perturbation_direction/replogle/pred/test312_w2_ema_seed0.parquet": "895b4c581bd1e4be1dda6d2b7eb946167394e509b89c1eb9e55f4004947f7749",
     "/system/user/studentwork/fleischa/scldm_generation_20261020/outputs/perturbation_direction/replogle/pred/test312_w2_ema_cells128.parquet": "4513e9b81422f170515d864d0f904074617d3d45bbd9437617a6a4e31233d557",
@@ -235,6 +333,7 @@
     "/system/user/studentwork/fleischa/scldm_generation_20261020/outputs/perturbation_direction/replogle/pred/test312_w0.parquet": "330b573f9f374d8c3776d3c2d3ee9c081d9197586c333b51378de5881a72d3fd",
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_all/summary.csv": "6e0b3cc625917893435d5de44d9201e0576d8ac1746b301bcb1643c86f4b9bbc",
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_all/summary_specific.csv": "18fbd6ea1f0631f72550e836aa00791aeb8241625f1b6261ecea53309f81b8d5",
+    "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_all/summary_unchanged.csv": "0af2b0c8613a550d66fc4a1311732c6b7efbcfe5f039c8bb53c510e019677eb0",
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_all/per_perturbation/noise_ceiling_(split-half).csv": "7e279243708be756548fce2b2dfb1e5427d28e212b493cc078495cfdd033abf1",
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_all/per_perturbation/scLDM_s0.csv": "3835f4bc5b858411ec131bac3a773f042fe8d34bbb182cd5b37c66c686f0f9bf",
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_all/per_perturbation/scLDM_s0_(shuffled).csv": "8d8d2996f5fcbeda73571bdefed07e1f1c3bf95184cc384fa3a4d4429e7a6756",
@@ -253,7 +352,16 @@
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_all/per_perturbation_specific/scLDM_w1_(shuffled).csv": "4272a81569756b3a707bf2e25ab202d000aee3a3337a93648ec87c341b1b8f48",
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_all/per_perturbation_specific/scLDM_w2_ema_cells128.csv": "a316161ac75d10c2390c4fd43193c2fce530ea2a48a05f82ffd648e309d593c6",
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_all/per_perturbation_specific/scLDM_w2_ema_cells128_(shuffled).csv": "705031ce046402b31292c2c8adbafa04a8157a2032a33d259dc15e9a2e1bb5b3",
-    "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_all/methods.json": "16d5cff6e66f0e793621702c57b93d89c5b7124f8798b73eb365eefd0df9ef75",
+    "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_all/per_perturbation_unchanged/noise_ceiling_(split-half).csv": "8ee5d49b8e4dc017ea5d6478b1d0a618b088e58ba59e5b1c29d2c44bdd9560e9",
+    "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_all/per_perturbation_unchanged/scLDM_s0.csv": "b6b04ba277d159aba6eed441a7ece27d72c87d6e380739846e588d38abadce6b",
+    "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_all/per_perturbation_unchanged/scLDM_s0_(shuffled).csv": "599fe4be018cb5d9d4b3e28e41789f01bdc2c3502722d39a8c58b932c463f993",
+    "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_all/per_perturbation_unchanged/scLDM_w0.csv": "628915b035778c60d9587a7d8c91b5a04363cc95346d82f53c5c805bed68477c",
+    "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_all/per_perturbation_unchanged/scLDM_w0_(shuffled).csv": "aae83c808b02bd4add42c98188e50754ae8871444a2a9fc6685cf21cf0a036c3",
+    "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_all/per_perturbation_unchanged/scLDM_w1.csv": "40e1e54060fcd31e41eea6f92ddb58b250fa5cfca03d4a01a2842b924390edce",
+    "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_all/per_perturbation_unchanged/scLDM_w1_(shuffled).csv": "3a06c5cea5530c095a94065e4f744c87766622ad8a31e6937b45fb1cfb241137",
+    "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_all/per_perturbation_unchanged/scLDM_w2_ema_cells128.csv": "f1d40617ab0f75de614e98ff1553c8fd69d83d3a2f391d0c8804cc7f46f099dd",
+    "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_all/per_perturbation_unchanged/scLDM_w2_ema_cells128_(shuffled).csv": "745b534348aba0ae6936fa04dc611f4b34e773a01585608bfdfdf02d39f0388d",
+    "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/eval_controls_all/methods.json": "c29ff1bd474a0173ff0f7f5bca87f58fe3334f370edda19d82e78af9a2984058",
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/truth_all_test/ceiling.csv": "7e279243708be756548fce2b2dfb1e5427d28e212b493cc078495cfdd033abf1",
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/truth_all_test/deg.parquet": "d5fdeed36cbbb1cbd84b56223f381e86beb1173426fa9c2068c1cea27795f44d",
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/truth_all_test/deg_half_a.parquet": "2b16f61c6427e0baf453e99356d2d1605808fd029c8768168e7b2811fad1683f",
@@ -262,6 +370,7 @@
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/truth_all_test/delta_true.parquet": "87ddccad0e56cae6de1b59cfc625347ee34b59c35c78958392fef86fb626ae25",
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/truth_all_test/info.json": "ce32387d7406d19ff828af85ae1650c5e0b363fdeb9079932d2b8378c81b6cfb",
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/truth_all_test/padj.parquet": "32615ff12a8823688e4d108092c12d9447400e8e9a05a90b8c41515e62aaf01e",
+    "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/truth_all_test/padj_half_a.parquet": "40662d6c12d273dd8fe1cc358ce0888d86480acd9f30ec455ad99fedee14449a",
     "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/baselines_all/delta_generic.parquet": "415d17d65ef1850b36a7ead684579f4f1ca6abcfd718e4263e08208c840390b0"
   },
   "extra_inputs": {
@@ -271,7 +380,7 @@
     },
     "inputs_stamp": {
       "path": "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/logs/inputs.sha256",
-      "sha256": "459f56d587a1a5c4c1fd45f15b6c066ddc14788da1090df154d86aaa3a54eb00"
+      "sha256": "9c684455e17a048272589e056da80dc1f1be4a70eb2da914c485413695d2cc8d"
     },
     "a5_truth": {
       "path": "/system/user/studentwork/fleischa/replogle_raw_prepared/eval/verify/a5_truth.json",
@@ -321,6 +430,7 @@
   "tables": [
     "replogle_raw_test312_w2ema_3seeds_controls_side_by_side.csv",
     "replogle_raw_test312_w2ema_3seeds_controls_side_by_side_specific.csv",
+    "replogle_raw_test312_w2ema_3seeds_controls_side_by_side_unchanged.csv",
     "replogle_raw_test312_w2ema_3seeds_controls_side_by_side_long.csv",
     "replogle_raw_test312_w2ema_3seeds_controls_side_by_side_panel.csv",
     "replogle_raw_test312_w2ema_3seeds_controls_side_by_side.md",
