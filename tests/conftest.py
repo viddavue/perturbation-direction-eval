@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 import anndata as ad
@@ -7,6 +8,9 @@ import pytest
 # Repository root directory (relative to this file)
 REPO_ROOT = Path(__file__).parent.parent
 CONFIG_DIR = REPO_ROOT / "experiments" / "configs"
+
+# Make `experiments.perturbation_direction.*` importable from the tests
+sys.path.insert(0, str(REPO_ROOT))
 
 # Local data paths (only available on specific machine)
 CHECKPOINTS_PATH = Path("/Users/gpalla/Datasets/scg_vae/vae_census")

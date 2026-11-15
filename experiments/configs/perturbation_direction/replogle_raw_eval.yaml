@@ -1,10 +1,10 @@
 # Raw Replogle-Nadig rebuild, evaluation stage: the prepared `filtered` / `all` files -> the side-by-side main table.
-# Runner: experiments/perturbation_direction/run_replogle_raw_eval.sh (steps and outputs are listed there).
+# Runner: experiments/perturbation_direction/runners/run_replogle_raw_eval.sh (steps and outputs are listed there).
 # Data stage (must have finished first): replogle_raw.yaml + run_replogle_raw_data.sh.
 #
 # Relative paths are relative to the repository root (the runner cds there). Any key can be overridden on the
 # command line in OmegaConf dotlist form, e.g.
-#   bash experiments/perturbation_direction/run_replogle_raw_eval.sh \
+#   bash experiments/perturbation_direction/runners/run_replogle_raw_eval.sh \
 #     prepared_dir=/tmp/prepared generation_dir=outputs/perturbation_direction/replogle controls=null
 # (`controls=null` skips the optional generation controls; `{}` would merge into the mapping and change nothing.)
 
@@ -18,7 +18,7 @@ versions: [filtered, all]     # each evaluated end to end; the primary is listed
 primary_version: filtered     # A5 gate and the validation check run on it
 
 train_json: metadata/replogle_train.json                            # the 2,000 model genes (order)
-split_json: experiments/perturbation_direction/splits/replogle_val60.json  # 60 val / 312 test of the 372
+split_json: experiments/perturbation_direction/data/splits/replogle_val60.json  # 60 val / 312 test of the 372
 
 ground_truth:                 # ground_truth.py, as for the frozen STATE truth (CP10k over the 2,000 genes, log1p)
   pert_key: gene

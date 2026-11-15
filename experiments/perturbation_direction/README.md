@@ -2,6 +2,12 @@
 
 How well does scLDM predict whether a perturbation pushes a gene **up or down**?
 
+The code is grouped by stage: `data/` prepares and verifies data; `generation/`
+generates profiles; `baselines/` implements comparators; `evaluation/` scores and
+summarizes results; `vcc/` contains optional cell-level diagnostics; `dashboard/`
+contains the explorer; and `runners/` contains the shell entry points. The index
+below names scripts without their directory prefixes.
+
 ```
 audit_raw_screen.py     per raw Replogle screen: integer counts, controls, model genes, vocabulary (read-only)
 knockdown_filter.py     STATE's (cell-load) on-target knockdown filter, reproduced from raw counts
@@ -19,7 +25,7 @@ learned_baselines.py  trained direction classifiers ported from perturbational_e
 direction_models.py   their models + SVD gene/perturbation embeddings
 evaluate.py      per-perturbation metrics, summary table, specificity (shuffled) control, plots; three reports:
                  direction of the full effect, of the perturbation-specific part, and changed vs unchanged genes
-metrics.py       pure metric functions (tested in tests/test_direction_metrics.py, test_direction_unchanged.py)
+metrics.py       pure metric functions (tested in tests/perturbation_direction/evaluation/)
 subset_truth.py  restrict a truth dir to the val or test side of a split
 select_sweep.py  guidance/EMA choice from the validation perturbations only
 stats.py         bootstrap CIs over perturbations, paired Wilcoxon tests, Holm
@@ -30,7 +36,7 @@ run_replogle_raw_eval.sh  evaluation stage: truth per version -> A5 + validation
                           evaluate.py per version -> side_by_side.py
 ```
 
-**Replogle now runs from the raw screens**, in two stages on the server ([SERVER.md](SERVER.md) sections 4-5):
+**Replogle now runs from the raw screens**, in two stages on the server ([SERVER.md](../../docs/SERVER.md) sections 4-5):
 `run_replogle_raw_data.sh` (config `experiments/configs/perturbation_direction/replogle_raw.yaml`) and
 `run_replogle_raw_eval.sh` (config `replogle_raw_eval.yaml`). The generations are reused, not regenerated.
 
@@ -68,7 +74,7 @@ with the same three scLDM seeds (w2 + EMA). `filtered` is primary.
 
 ### VCC-2026-oriented experiments
 
-See the cell-level VCC diagnostics appendix in [METHODS.md](METHODS.md) for the pinned official
+See the cell-level VCC diagnostics appendix in [METHODS.md](../../docs/METHODS.md) for the pinned official
 metric implementation, fixed-panel effect retrieval, the denoising/filtering ablation, and the
 cell-level DE results. These are local Replogle diagnostics, not official Challenge leaderboard
 scores.
@@ -76,8 +82,8 @@ scores.
 An interactive explorer for any evaluation run (`evaluate.py` output directory):
 
 ```bash
-uv pip install -r experiments/perturbation_direction/dashboard_requirements.txt   # once
-streamlit run experiments/perturbation_direction/dashboard.py -- --root outputs/perturbation_direction
+uv pip install -r experiments/perturbation_direction/dashboard/dashboard_requirements.txt   # once
+streamlit run experiments/perturbation_direction/dashboard/dashboard.py -- --root outputs/perturbation_direction
 ```
 
 | view | what it shows |
@@ -109,7 +115,7 @@ streamlit run experiments/perturbation_direction/dashboard.py -- --root outputs/
 - **Unchanged genes are scored in a report of their own.** Scoring DEGs only never penalises a method for
   predicting changes in genes that do not change. The third report, changed vs unchanged genes
   (`summary_unchanged.csv`, `per_perturbation_unchanged/`), asks whether the predicted effect size separates
-  the two ([METHODS.md](METHODS.md) section g).
+  the two ([METHODS.md](../../docs/METHODS.md) section g).
   - **Unchanged** = not a DEG, |Δ| < 0.05 and padj >= 0.5. Genes in between (not significant, but not
     clearly unaffected) form a grey zone and are left out of the headline.
   - **Headline: `detect_auroc`**, the AUROC of |predicted Δ| for DEGs against unchanged genes, per
@@ -159,8 +165,8 @@ streamlit run experiments/perturbation_direction/dashboard.py -- --root outputs/
 
 ## Replogle, legacy STATE route (GPU machine, batch size 32)
 
-**The current route is the raw rebuild above ([SERVER.md](SERVER.md) sections 4-5).** This section is how the
-original STATE-based runs were made; [SERVER.md](SERVER.md) also covers multi-GPU generation (`--gpus 0,1,2,3`,
+**The current route is the raw rebuild above ([SERVER.md](../../docs/SERVER.md) sections 4-5).** This section is how the
+original STATE-based runs were made; [SERVER.md](../../docs/SERVER.md) also covers multi-GPU generation (`--gpus 0,1,2,3`,
 resumable), SLURM arrays, and time estimates. The commands below are the single-machine version.
 
 STATE-style split: test = HepG2 × 372 CRISPRi targets, all of which are seen in other cell lines in
@@ -178,31 +184,31 @@ A=_artifacts/resubmission; O=outputs/perturbation_direction/replogle; E=experime
 D=_artifacts/datasets/replogle_state
 curl -L -C - -o $D/replogle.h5ad \
   https://huggingface.co/datasets/arcinstitute/Replogle-Nadig-Preprint/resolve/main/replogle.h5ad
-python $E/prepare_replogle_state.py --src $D/replogle.h5ad --train-json metadata/replogle_train.json \
+python $E/data/prepare_replogle_state.py --src $D/replogle.h5ad --train-json metadata/replogle_train.json \
   --test-json metadata/replogle_test.json --out-dir $D
 TRAIN=$D/replogle_train.h5ad; TEST=$D/replogle_test.h5ad
 
-python $E/audit.py --train-h5ad $TRAIN --test-h5ad $TEST \
+python $E/data/audit.py --train-h5ad $TRAIN --test-h5ad $TEST \
   --train-json metadata/replogle_train.json --test-json metadata/replogle_test.json \
   --pert-key gene --control non-targeting --context-key cell_line --target-context hepg2 \
   --size-factor-pkl $A/replogle_log_size_factor_munew.pkl --ckpt $A/replogle_negative_binomial.ckpt
 
-python $E/ground_truth.py --pert-h5ad $TEST --ctrl-h5ad $TRAIN --pert-key gene --control non-targeting \
+python $E/evaluation/ground_truth.py --pert-h5ad $TEST --ctrl-h5ad $TRAIN --pert-key gene --control non-targeting \
   --context cell_line=hepg2 --metadata-json metadata/replogle_train.json --min-cells 15 --out-dir $O/truth
 
-python $E/baselines.py --train-h5ad $TRAIN --pert-key gene --control non-targeting \
+python $E/baselines/baselines.py --train-h5ad $TRAIN --pert-key gene --control non-targeting \
   --context-key cell_line --target-context hepg2 --truth-dir $O/truth --out-dir $O/baselines
 
 # pilot first: head -6 $O/truth/conditions.csv > $O/pilot.csv and run with --n-cells 64
 LIB=$(python -c "import json;print(json.load(open('$O/truth/info.json'))['control_median_library_size'])")
 for W in 1 2 4; do for EMA in "" "--ema"; do
-  python $E/generate.py --config $A/replogle_negative_binomial.yaml --ckpt $A/replogle_negative_binomial.ckpt \
+  python $E/generation/generate.py --config $A/replogle_negative_binomial.yaml --ckpt $A/replogle_negative_binomial.ckpt \
     --metadata-json metadata/replogle_train.json --conditions $O/truth/conditions.csv \
     --n-cells 256 --batch-size 32 --guidance $W $EMA --library-size $LIB \
     --out $O/pred/w${W}${EMA:+_ema}.parquet
 done; done
 
-python $E/evaluate.py --truth-dir $O/truth --exclude-target \
+python $E/evaluation/evaluate.py --truth-dir $O/truth --exclude-target \
   --pred scLDM_w1=$O/pred/w1.parquet scLDM_w2=$O/pred/w2.parquet scLDM_w1_ema=$O/pred/w1_ema.parquet \
   --baseline transfer=$O/baselines/delta_transfer.parquet generic=$O/baselines/delta_generic.parquet \
              knn=$O/baselines/delta_knn.parquet \
@@ -222,14 +228,14 @@ modelling.
 
 ```bash
 A=_artifacts/resubmission; O=outputs/perturbation_direction/dentate_gyrus; E=experiments/perturbation_direction
-python $E/ground_truth.py --pert-h5ad _artifacts/datasets/dentategyrus_test.h5ad \
+python $E/evaluation/ground_truth.py --pert-h5ad _artifacts/datasets/dentategyrus_test.h5ad \
   --ctrl-h5ad _artifacts/datasets/dentategyrus_test.h5ad --layer X_counts --pert-key clusters \
   --control ImmGranule1 --perturbations CA OPC Nbl2 ImmAstro RadialGlia \
   --metadata-json metadata/dentategyrus_train.json --out-dir $O
-python $E/generate.py --config $A/dentate_gyrus_negative_binomial.yaml --ckpt $A/dentate_gyrus_negative_binomial.ckpt \
+python $E/generation/generate.py --config $A/dentate_gyrus_negative_binomial.yaml --ckpt $A/dentate_gyrus_negative_binomial.ckpt \
   --metadata-json metadata/dentategyrus_train.json --conditions $O/conditions.csv \
   --n-cells 32 --batch-size 16 --device cpu --library-size 2514 --out $O/pred_w1.parquet
-python $E/evaluate.py --truth-dir $O --pred scLDM=$O/pred_w1.parquet --out-dir $O/eval
+python $E/evaluation/evaluate.py --truth-dir $O --pred scLDM=$O/pred_w1.parquet --out-dir $O/eval
 ```
 
 Note: in the dentate gyrus h5ad, `X` is log-normalized and raw counts are in `layers['X_counts']`.

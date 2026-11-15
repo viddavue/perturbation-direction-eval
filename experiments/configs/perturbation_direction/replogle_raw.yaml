@@ -3,7 +3,7 @@
 #
 # Relative paths are relative to the working directory: run from the repository root (the runner cds there).
 # Any key can be overridden on the command line in OmegaConf dotlist form, e.g.
-#   python experiments/perturbation_direction/prepare_replogle_raw.py \
+#   python experiments/perturbation_direction/data/prepare_replogle_raw.py \
 #     --config experiments/configs/perturbation_direction/replogle_raw.yaml \
 #     raw_dir=_artifacts/datasets/replogle_raw out_dir=/tmp/raw_prepared block=5000
 
