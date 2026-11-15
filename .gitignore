@@ -28,6 +28,8 @@ src/scldm/_version.py
 
 # Local notes
 SETUP_NOTES.md
+/REPORT_CHAPTER_NOTES.md
+/memory/
 /outputs/
 /data/
 *.h5ad

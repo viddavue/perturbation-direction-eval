@@ -72,21 +72,21 @@ By reference strength (balanced accuracy): 0.942 at 5-19 DEGs (10 perturbations)
 
 ```bash
 B=/system/user/studentwork/fleischa/scldm_generation_20261020   # server job dir
-python experiments/perturbation_direction/prepare_parse1m.py \
+python experiments/perturbation_direction/data/prepare_parse1m.py \
   --src <figshare h5ad> --metadata-json metadata/parse1m_train.json \
   --test-json metadata/parse1m_test.json --cell-type "CD4 Naive" --control PBS \
   --max-cells 2000 --out-dir $B/outputs/perturbation_direction/parse1m/prepared
-python experiments/perturbation_direction/ground_truth.py \
+python experiments/perturbation_direction/evaluation/ground_truth.py \
   --pert-h5ad .../prepared/parse1m_cd4naive.h5ad --ctrl-h5ad .../prepared/parse1m_cd4naive.h5ad \
   --layer X --pert-key cytokine --control PBS --context "cell_type=CD4 Naive" \
   --perturbations <27 cytokines> --metadata-json .../prepared/parse1m_genes_available.json \
   --min-cells 15 --out-dir .../parse1m/truth
-python experiments/perturbation_direction/generate.py \
+python experiments/perturbation_direction/generation/generate.py \
   --config _artifacts/resubmission/czb_cd4_naive_holdout_negative_binomial.yaml \
   --ckpt _artifacts/resubmission/czb_cd4_naive_holdout_negative_binomial.ckpt \
   --metadata-json metadata/parse1m_train.json --conditions .../parse1m/conditions.csv \
   --n-cells 128 --batch-size 32 --library-size 102.5 --guidance 1 --seed 0 --gpus 0,1,2,3,4 \
   --out .../parse1m/pred/w1.parquet
-python experiments/perturbation_direction/evaluate.py \
+python experiments/perturbation_direction/evaluation/evaluate.py \
   --truth-dir .../parse1m/truth --pred scLDM_w1=.../parse1m/pred/w1.parquet --out-dir .../parse1m/eval
 ```

@@ -19,7 +19,7 @@ git clone <your-remote> scldm && cd scldm && git checkout perturbation-direction
 
 # uv: curl -LsSf https://astral.sh/uv/install.sh | sh    (if not installed)
 uv venv --python 3.11 .venv && source .venv/bin/activate
-uv pip install --override experiments/perturbation_direction/overrides.txt -e ".[test]" scanpy pyarrow h5py \
+uv pip install --override experiments/perturbation_direction/runners/overrides.txt -e ".[test]" scanpy pyarrow h5py \
   "cellarium-ml @ git+https://github.com/cellarium-ai/cellarium-ml.git@a3720244bf0cfc4950e89ad583ceb0f86ed07199"
 python -m pytest -q tests            # expect: ~247 passed, 5 skipped (2026-11-10)
 python -c "import torch; print(torch.cuda.device_count(), torch.cuda.get_device_name(0))"
@@ -54,18 +54,18 @@ config, w2 + EMA, on the 312 test perturbations with seeds 0-2 (`run_seeds_replo
 controls). On student03 they are in
 `/system/user/studentwork/fleischa/scldm_generation_20261020/outputs/perturbation_direction/replogle/`
 (sha256 identical to the local copies under `outputs/perturbation_direction/replogle/`). The split is
-`experiments/perturbation_direction/splits/replogle_val60.json`. The recipe below is the generic multi-GPU one.
+`experiments/perturbation_direction/data/splits/replogle_val60.json`. The recipe below is the generic multi-GPU one.
 
 The conditions come straight from the test metadata (HepG2 control + 372 test perturbations), so this
 step can start right away.
 
 ```bash
 O=outputs/perturbation_direction/replogle; A=_artifacts/resubmission
-python $E/make_conditions.py --test-json metadata/replogle_test.json --pert-key gene \
+python $E/data/make_conditions.py --test-json metadata/replogle_test.json --pert-key gene \
   --control non-targeting --context cell_line=hepg2 --out $O/conditions_all.csv
 
 gen() {  # usage: gen <guidance> <ema flag or ""> <gpu list>
-  python $E/generate.py --config $A/replogle_negative_binomial.yaml --ckpt $A/replogle_negative_binomial.ckpt \
+  python $E/generation/generate.py --config $A/replogle_negative_binomial.yaml --ckpt $A/replogle_negative_binomial.ckpt \
     --metadata-json metadata/replogle_train.json --conditions $O/conditions_all.csv \
     --n-cells 64 --batch-size 32 --library-size 4850 --guidance $1 $2 --gpus $3 \
     --out $O/pred/w$1${2:+_ema}.parquet
@@ -95,9 +95,9 @@ SLURM alternative (one array task per shard, then merge):
 
 ```bash
 #SBATCH --array=0-7 --gres=gpu:1
-srun python $E/generate.py <same args as above, without --gpus> --shard $SLURM_ARRAY_TASK_ID --num-shards 8
+srun python $E/generation/generate.py <same args as above, without --gpus> --shard $SLURM_ARRAY_TASK_ID --num-shards 8
 # afterwards, once all tasks have finished:
-python $E/generate.py <same args> --merge-only
+python $E/generation/generate.py <same args> --merge-only
 ```
 
 ## 4. Data: raw rebuild (CPU)
@@ -109,24 +109,24 @@ URL/size/md5, filter parameters). Any key can be overridden as `key=value` on ev
 
 ```bash
 # once, on the PC (reads the 22 GB STATE file in row blocks, ~4 min, 1.5 GB RAM):
-python $E/make_state_reference.py --state _artifacts/datasets/replogle_state/replogle.h5ad \
+python $E/data/make_state_reference.py --state _artifacts/datasets/replogle_state/replogle.h5ad \
   --train _artifacts/datasets/replogle_state/replogle_train.h5ad --test _artifacts/datasets/replogle_state/replogle_test.h5ad \
   --metadata-json metadata/replogle_train.json --out-dir outputs/perturbation_direction/replogle_raw/state_reference
 rsync -a outputs/perturbation_direction/replogle_raw/state_reference/ <server>:<repo>/outputs/perturbation_direction/replogle_raw/state_reference/
 
 # on student03, from the repo root (checksums -> audit x4 -> prepare -> identity gates A1-A4; per-step hash resume,
 # FORCE=1 reruns all, MD5_JOBS=<n> parallel md5s; DONE marker at the end; see the runner's header):
-tmux new -s rawdata 'bash experiments/perturbation_direction/run_replogle_raw_data.sh; bash'
+tmux new -s rawdata 'bash experiments/perturbation_direction/runners/run_replogle_raw_data.sh; bash'
 cat /system/user/studentwork/fleischa/replogle_raw_prepared/DONE_raw_data
 ```
 
 The runner's steps, one by one:
 
 ```bash
-python $E/verify_merge.py checksums --config experiments/configs/perturbation_direction/replogle_raw.yaml
-python $E/audit_raw_screen.py --h5ad <raw>.h5ad --cell-line hepg2 --metadata-json metadata/replogle_train.json --out audit_hepg2.json
-python $E/prepare_replogle_raw.py --config experiments/configs/perturbation_direction/replogle_raw.yaml
-python $E/verify_merge.py identity --config experiments/configs/perturbation_direction/replogle_raw.yaml
+python $E/data/verify_merge.py checksums --config experiments/configs/perturbation_direction/replogle_raw.yaml
+python $E/data/audit_raw_screen.py --h5ad <raw>.h5ad --cell-line hepg2 --metadata-json metadata/replogle_train.json --out audit_hepg2.json
+python $E/data/prepare_replogle_raw.py --config experiments/configs/perturbation_direction/replogle_raw.yaml
+python $E/data/verify_merge.py identity --config experiments/configs/perturbation_direction/replogle_raw.yaml
 ```
 
 - **Outputs** (`out_dir`): `replogle_{train,test}_raw_{filtered,all}.h5ad` (CSR int32 counts over the 2,000
@@ -182,11 +182,11 @@ and the report's split-half ceiling needs.
 # prerequisites on student03: the data stage finished (DONE_raw_data), and the frozen selection table, which
 # lives in outputs/ (not in git), is at the configured path (or run with selection.frozen_json=null):
 #   rsync -a outputs/perturbation_direction/replogle/selection.json <server>:<repo>/outputs/perturbation_direction/replogle/
-tmux new -s raweval 'bash experiments/perturbation_direction/run_replogle_raw_eval.sh; bash'
+tmux new -s raweval 'bash experiments/perturbation_direction/runners/run_replogle_raw_eval.sh; bash'
 cat /system/user/studentwork/fleischa/replogle_raw_prepared/eval/DONE_raw_eval
 cat results/replogle_raw_test312_w2ema_3seeds_side_by_side.md
 # on the PC (generations under outputs/):
-PYTHON=$PWD/.venv/bin/python bash experiments/perturbation_direction/run_replogle_raw_eval.sh \
+PYTHON=$PWD/.venv/bin/python bash experiments/perturbation_direction/runners/run_replogle_raw_eval.sh \
   prepared_dir=<prepared dir> generation_dir=outputs/perturbation_direction/replogle
 ```
 
@@ -235,37 +235,37 @@ The runner's steps by hand (what it runs, with the default config):
 ```bash
 P=/system/user/studentwork/fleischa/replogle_raw_prepared; O=$P/eval
 G=/system/user/studentwork/fleischa/scldm_generation_20261020/outputs/perturbation_direction/replogle
-F=outputs/perturbation_direction/replogle; S=experiments/perturbation_direction/splits/replogle_val60.json
+F=outputs/perturbation_direction/replogle; S=experiments/perturbation_direction/data/splits/replogle_val60.json
 for V in filtered all; do
-  python $E/ground_truth.py --pert-h5ad $P/replogle_test_raw_$V.h5ad --ctrl-h5ad $P/replogle_train_raw_$V.h5ad \
+  python $E/evaluation/ground_truth.py --pert-h5ad $P/replogle_test_raw_$V.h5ad --ctrl-h5ad $P/replogle_train_raw_$V.h5ad \
     --pert-key gene --control non-targeting --context cell_line=hepg2 --metadata-json metadata/replogle_train.json \
     --min-cells 15 --out-dir $O/truth_$V
   for W in val test; do
-    python $E/subset_truth.py --truth-dir $O/truth_$V --split-json $S --which $W --out-dir $O/truth_${V}_$W
+    python $E/evaluation/subset_truth.py --truth-dir $O/truth_$V --split-json $S --which $W --out-dir $O/truth_${V}_$W
   done
 done
-python $E/verify_merge.py truth --ours $O/truth_filtered --reference $F/truth --out $O/verify/a5_truth.json
-python $E/verify_merge.py truth --ours $O/truth_filtered_test --reference $F/truth_test312 --out $O/verify/a5_truth_test.json
+python $E/data/verify_merge.py truth --ours $O/truth_filtered --reference $F/truth --out $O/verify/a5_truth.json
+python $E/data/verify_merge.py truth --ours $O/truth_filtered_test --reference $F/truth_test312 --out $O/verify/a5_truth_test.json
 mkdir -p $O/selection/sweep && for C in w1 w1_ema w2 w2_ema w4 w4_ema; do ln -s $G/sweep/$C.parquet $O/selection/sweep/; done
-python $E/select_sweep.py --sweep-dir $O/selection/sweep --truth-dir $O/truth_filtered_val --val-split $S \
+python $E/generation/select_sweep.py --sweep-dir $O/selection/sweep --truth-dir $O/truth_filtered_val --val-split $S \
   --out $O/selection/selection_filtered.json
-python $E/side_by_side.py check-selection --rescored $O/selection/selection_filtered.json --expected w2_ema \
+python $E/evaluation/side_by_side.py check-selection --rescored $O/selection/selection_filtered.json --expected w2_ema \
   --frozen $F/selection.json --out $O/selection/check.json
-python $E/verify_merge.py compare --filtered $O/truth_filtered --all $O/truth_all --out-dir $O/verify/filtered_vs_all
+python $E/data/verify_merge.py compare --filtered $O/truth_filtered --all $O/truth_all --out-dir $O/verify/filtered_vs_all
 for V in filtered all; do
   T=$P/replogle_train_raw_$V.h5ad; B=$O/baselines_$V; L=$O/learned_$V
-  python $E/baselines.py --train-h5ad $T --pert-key gene --control non-targeting --context-key cell_line \
+  python $E/baselines/baselines.py --train-h5ad $T --pert-key gene --control non-targeting --context-key cell_line \
     --target-context hepg2 --truth-dir $O/truth_$V --recompute --out-dir $B
-  python $E/learned_baselines.py --train-h5ad $T --truth-dir $O/truth_$V --pert-key gene --control non-targeting \
+  python $E/baselines/learned_baselines.py --train-h5ad $T --truth-dir $O/truth_$V --pert-key gene --control non-targeting \
     --context-key cell_line --target-context hepg2 --recompute --out-dir $L
-  python $E/evaluate.py --truth-dir $O/truth_${V}_test --exclude-target \
+  python $E/evaluation/evaluate.py --truth-dir $O/truth_${V}_test --exclude-target \
     --pred scLDM_s0=$G/pred/test312_w2_ema_seed0.parquet scLDM_s1=$G/pred/test312_w2_ema_seed1.parquet \
            scLDM_s2=$G/pred/test312_w2_ema_seed2.parquet \
     --baseline knn=$B/delta_knn.parquet mlp=$L/delta_mlp.parquet generic=$B/delta_generic.parquet \
                transfer=$B/delta_transfer.parquet prior=$L/delta_prior.parquet \
     --specific-ref $B/delta_generic.parquet --direction-only mlp prior --out-dir $O/eval_$V
 done
-python $E/side_by_side.py table --eval filtered=$O/eval_filtered --eval all=$O/eval_all --primary filtered \
+python $E/evaluation/side_by_side.py table --eval filtered=$O/eval_filtered --eval all=$O/eval_all --primary filtered \
   --tag replogle_raw_test312_w2ema_3seeds --out-dir results --timestamp "$(date -u +%FT%TZ)" \
   --input manifest=$P/manifest.json \
   --frozen-summary full=results/replogle_test312_w2ema_3seeds_summary.csv \
@@ -290,8 +290,8 @@ python $E/side_by_side.py table --eval filtered=$O/eval_filtered --eval all=$O/e
 ## 6. Dashboard (optional)
 
 ```bash
-uv pip install -r experiments/perturbation_direction/dashboard_requirements.txt
-streamlit run experiments/perturbation_direction/dashboard.py --server.port 8501 --server.headless true \
+uv pip install -r experiments/perturbation_direction/dashboard/dashboard_requirements.txt
+streamlit run experiments/perturbation_direction/dashboard/dashboard.py --server.port 8501 --server.headless true \
   -- --root outputs/perturbation_direction        # or the eval dir: --root <prepared_dir>/eval
 # on your PC:  ssh -L 8501:localhost:8501 <server>   then open http://localhost:8501
 ```
@@ -307,31 +307,31 @@ D=_artifacts/datasets/replogle_state; mkdir -p $D
 URL=https://huggingface.co/datasets/arcinstitute/Replogle-Nadig-Preprint/resolve/main/replogle.h5ad
 until curl -L -C - -sS --speed-limit 100000 --speed-time 60 -o $D/replogle.h5ad $URL; do sleep 10; done
 ls -l $D/replogle.h5ad                                   # must be 22297813040 bytes
-python $E/prepare_replogle_state.py --src $D/replogle.h5ad --train-json metadata/replogle_train.json \
+python $E/data/prepare_replogle_state.py --src $D/replogle.h5ad --train-json metadata/replogle_train.json \
   --test-json metadata/replogle_test.json --out-dir $D   # chunked, a few GB RAM
 cat $D/prepare_info.json   # recovered/UMI ratio quantiles: min should not sit far below the 1% quantile
 
 TRAIN=$D/replogle_train.h5ad; TEST=$D/replogle_test.h5ad; O=outputs/perturbation_direction/replogle
-A=_artifacts/resubmission; S=experiments/perturbation_direction/splits/replogle_val60.json
-python $E/audit.py --train-h5ad $TRAIN --test-h5ad $TEST \
+A=_artifacts/resubmission; S=experiments/perturbation_direction/data/splits/replogle_val60.json
+python $E/data/audit.py --train-h5ad $TRAIN --test-h5ad $TEST \
   --train-json metadata/replogle_train.json --test-json metadata/replogle_test.json \
   --pert-key gene --control non-targeting --context-key cell_line --target-context hepg2 \
   --size-factor-pkl $A/replogle_log_size_factor_munew.pkl --ckpt $A/replogle_negative_binomial.ckpt
-python $E/ground_truth.py --pert-h5ad $TEST --ctrl-h5ad $TRAIN --pert-key gene --control non-targeting \
+python $E/evaluation/ground_truth.py --pert-h5ad $TEST --ctrl-h5ad $TRAIN --pert-key gene --control non-targeting \
   --context cell_line=hepg2 --metadata-json metadata/replogle_train.json --min-cells 15 --out-dir $O/truth
-python $E/subset_truth.py --truth-dir $O/truth --split-json $S --which test --out-dir $O/truth_test312
-python $E/baselines.py --train-h5ad $TRAIN --pert-key gene --control non-targeting \
+python $E/evaluation/subset_truth.py --truth-dir $O/truth --split-json $S --which test --out-dir $O/truth_test312
+python $E/baselines/baselines.py --train-h5ad $TRAIN --pert-key gene --control non-targeting \
   --context-key cell_line --target-context hepg2 --truth-dir $O/truth --out-dir $O/baselines
-python $E/learned_baselines.py --train-h5ad $TRAIN --truth-dir $O/truth --pert-key gene --control non-targeting \
+python $E/baselines/learned_baselines.py --train-h5ad $TRAIN --truth-dir $O/truth --pert-key gene --control non-targeting \
   --context-key cell_line --target-context hepg2 --out-dir $O/learned
-python $E/evaluate.py --truth-dir $O/truth_test312 --exclude-target \
+python $E/evaluation/evaluate.py --truth-dir $O/truth_test312 --exclude-target \
   --pred scLDM_s0=$O/pred/test312_w2_ema_seed0.parquet scLDM_s1=$O/pred/test312_w2_ema_seed1.parquet \
          scLDM_s2=$O/pred/test312_w2_ema_seed2.parquet \
   --baseline knn=$O/baselines/delta_knn.parquet mlp=$O/learned/delta_mlp.parquet \
              generic=$O/baselines/delta_generic.parquet transfer=$O/baselines/delta_transfer.parquet \
              prior=$O/learned/delta_prior.parquet \
   --specific-ref $O/baselines/delta_generic.parquet --direction-only mlp prior --out-dir $O/eval_test312
-python $E/freeze_results.py --eval-dir $O/eval_test312 --tag replogle_test312_w2ema_3seeds --reference scLDM_s0
+python $E/evaluation/freeze_results.py --eval-dir $O/eval_test312 --tag replogle_test312_w2ema_3seeds --reference scLDM_s0
 ```
 
 `--min-cells 15` is applied per half for the split-half ceiling. The HepG2 test perturbations have 30–433

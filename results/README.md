@@ -3,10 +3,30 @@
 Small, commit-able tables that the report cites. `outputs/` stays gitignored; this directory is
 the single source of truth.
 
+## Guide to the current report
+
+The report's main comparison uses the **raw rebuild shared panel**, not the older
+STATE-route summaries described below:
+
+- Main results, paired comparisons and filtered-versus-all robustness:
+  [`replogle_raw_hvg2000/replogle_raw_test312_w2ema_3seeds_side_by_side.md`](replogle_raw_hvg2000/replogle_raw_test312_w2ema_3seeds_side_by_side.md).
+  Its companion `_specific.csv`, `_unchanged.csv`, `_long.csv`, `_panel.csv` and
+  provenance JSON contain the corresponding machine-readable tables and inputs.
+- Generation controls: the
+  [`controls_side_by_side.md`](replogle_raw_hvg2000/replogle_raw_test312_w2ema_3seeds_controls_side_by_side.md)
+  table and its companion CSVs and provenance JSON.
+- The earlier `replogle_test312_w2ema_3seeds_summary*.csv` files are legacy STATE-route
+  results, not the source for the current report's shared-panel table.
+
+The report also notes that its expression-quartile and unchanged-threshold sensitivity
+analysis is not in the committed result tables; it needs independent verification before
+being cited as a reproducible result. See [methods](../docs/METHODS.md) and
+[server instructions](../docs/SERVER.md) for definitions and reproduction.
+
 Regenerate with:
 
 ```bash
-python experiments/perturbation_direction/freeze_results.py \
+python experiments/perturbation_direction/evaluation/freeze_results.py \
   --eval-dir outputs/perturbation_direction/legacy/replogle/eval_freeze_20261021 \
   --tag replogle_hepg2_hvg2000 --results-dir results
 ```
