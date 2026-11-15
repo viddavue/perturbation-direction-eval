@@ -19,9 +19,9 @@
   `model/*.yaml`, `datamodule/default.yaml` with per-dataset params, `paths/datasets.yaml`).
 - `experiments/scripts/` — `train.py` (VAE), `train_ldm.py` (DiT, loads a frozen VAE), `inference.py`.
 - `experiments/perturbation_direction/` — current research focus: scoring whether a perturbation
-  pushes a gene up or down. Read its `README.md` and `SERVER.md` before changing anything there.
+  pushes a gene up or down. Read its `README.md` and `docs/SERVER.md` before changing anything there.
 - `metadata/*.json` — gene and label vocabularies; required for `parse1m` and `replogle` splits.
-- `tests/` — `tests/test_direction_*.py` cover the perturbation pipeline; `test_load.py` and
+- `tests/perturbation_direction/` — tests grouped by pipeline stage; `tests/test_load.py` and
   `test_tokenize.py` cover the core library.
 
 ## Environment
@@ -29,7 +29,7 @@
 - Python >= 3.11, `uv`, and an existing `.venv` (set it up before `uv run`).
 - `cellarium-ml` is not installable from PyPI; install from the pinned git commit:
   `uv pip install -e ".[test]" "cellarium-ml @ git+https://github.com/cellarium-ai/cellarium-ml.git@a3720244bf0cfc4950e89ad583ceb0f86ed07199"`
-- On this machine use `experiments/perturbation_direction/overrides.txt`; the repo's own pins
+- On this machine use `experiments/perturbation_direction/runners/overrides.txt`; the repo's own pins
   (`anndata<=0.10.9`, `scvi-tools`) conflict with the versions the perturbation pipeline needs.
 - Large data and checkpoints are not in git: `_artifacts/resubmission/` (checkpoints, configs,
   size factors) and `_artifacts/datasets/` (AnnData). Fetch with
