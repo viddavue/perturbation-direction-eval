@@ -1,0 +1,11 @@
+# strength_gap.py: per-knockdown score gap (method_a - method_b) against knockdown strength.
+# Paths are relative to the repository root. Override with OmegaConf dotlist arguments, e.g. version=all.
+eval_dir: outputs/perturbation_direction/replogle_raw/eval/eval_filtered
+panel_csv: results/replogle_raw_hvg2000/replogle_raw_test312_w2ema_3seeds_side_by_side_panel.csv
+version: filtered            # which DEG count of the panel file sets knockdown strength
+method_a: scLDM_s0
+method_b: knn
+label_a: scLDM
+label_b: kNN
+bin_edges: [5, 20, 50, 150, 400, 700, 1200]   # fixed log-spaced bins of full-effect DEG counts, set before plotting
+out_dir: outputs/report_figures/strength_gap
