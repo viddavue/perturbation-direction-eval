@@ -2,6 +2,10 @@
 
 How well does scLDM predict whether a perturbation pushes a gene **up or down**?
 
+Report-ready confusion matrices and proposed complementary plots are documented in
+[docs/REPORT_FIGURES.md](../../docs/REPORT_FIGURES.md). Their entry point is
+`visualization/confusion.py`; defaults live in `experiments/configs/perturbation_direction/report_figures.yaml`.
+
 The code is grouped by stage: `data/` prepares and verifies data; `generation/`
 generates profiles; `baselines/` implements comparators; `evaluation/` scores and
 summarizes results; `vcc/` contains optional cell-level diagnostics; `dashboard/`

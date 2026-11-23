@@ -1,0 +1,5 @@
+# Paths are relative to the repository root. Override with OmegaConf dotlist arguments.
+eval_dir: outputs/perturbation_direction/replogle_raw/eval/eval_filtered
+panel_csv: results/replogle_raw_hvg2000/replogle_raw_test312_w2ema_3seeds_side_by_side_panel.csv
+methods: [scLDM_s0, knn, generic]
+out_dir: outputs/report_figures/confusion
